@@ -32,7 +32,7 @@ def get_maskrcnn_feature_extractor():
 # print(im.shape)
 # im = ImageList.from_tensors([im.cuda()])
 tensor = torch.ones([1, 3, 224, 224], dtype=torch.float32).cuda()
-model = get_maskrcnn().cuda()
+model = get_maskrcnn_feature_extractor().cuda()
 # print(model.backbone.__dict__)
 
 model.eval()
