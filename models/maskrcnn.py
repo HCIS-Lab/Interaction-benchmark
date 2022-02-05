@@ -33,12 +33,20 @@ def get_maskrcnn():
 # im = ImageList.from_tensors([im.cuda()])
 tensor = torch.ones([1, 3, 224, 224], dtype=torch.float32).cuda()
 model = get_maskrcnn().cuda()
-model.eval()
-features = model.backbone(tensor)
-# for k, v in features.items():
-# 	print(k)
-print(features['p6'][0][0][0][0:3])
-# print(len(features))
+# print(model.backbone.__dict__)
 
-# proposals, _ = model.proposal_generator(im, features)
-# instances, _ = model.roi_heads(im, features, proposals)
+model.eval()
+
+# ResNet features
+features = model.backbone.bottom_up(tensor)
+for k, v in features.items():
+	print(k)
+
+print('---------------------------------')
+# FPN features
+features = model.backbone(tensor)
+for k, v in features.items():
+	print(k)
+
+proposals, _ = model.proposal_generator(im, features)
+instances, _ = model.roi_heads(im, features, proposals)
