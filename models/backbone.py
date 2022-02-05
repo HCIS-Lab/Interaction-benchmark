@@ -8,7 +8,7 @@ from torchvision import transforms
 import cv2
 from PIL import Image
 
-def get_maskrcnn():
+def get_maskrcnn_feature_extractor():
     cfg = get_cfg()
     cfg.merge_from_file(model_zoo.get_config_file("COCO-InstanceSegmentation/mask_rcnn_R_50_FPN_3x.yaml"))
     # cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5  # set threshold for this model
