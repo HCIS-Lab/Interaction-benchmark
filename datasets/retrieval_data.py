@@ -24,6 +24,7 @@ class Retrieval_Data(Dataset):
         self.left = []
         self.right = []
         
+        # iterate scenarios (town0x)
         for sub_root in tqdm(root, file=sys.stdout):
             preload_file = os.path.join(sub_root, 'rg_lidar_diag_pl_'+str(self.seq_len)+'_'+str(self.pred_len)+'.npy')
 
@@ -32,19 +33,25 @@ class Retrieval_Data(Dataset):
                 preload_front = []
                 preload_left = []
                 preload_right = []
-
-                # list sub-directories in root 
+                preload_is_interactive = []
+                preload_ego_action = []
+                preload_actor_type = []
+                preload_actor_action = []
+                preload_regulation = []
+                # jsonfile
+                # a basis scenario
                 root_files = os.listdir(sub_root)
+                
+                # iterate basis scenario data
                 routes = [folder for folder in root_files if not os.path.isfile(os.path.join(sub_root,folder))]
                 for route in routes:
                     route_dir = os.path.join(sub_root, route)
-                    print(route_dir)
                     # first frame of sequence not used
                     fronts = []
                     lefts = []
                     rights = []
 
-                    # read files sequentially (past and current frames)
+                    # a data sample
                     for i in range(self.seq_len):
                         # images
                         filename = f"{str(self.seq_len+1+i).zfill(4)}.png"
@@ -55,13 +62,22 @@ class Retrieval_Data(Dataset):
                     preload_front.append(fronts)
                     preload_left.append(lefts)
                     preload_right.append(rights)
-
+                    preload_is_interactive.append()
+                    preload_ego_action.append()
+                    preload_actor_type.append()
+                    preload_actor_action.append()
+                    preload_regulation.append()
                 # dump to npy
                 preload_dict = {}
                 preload_dict['front'] = preload_front
                 preload_dict['left'] = preload_left
                 preload_dict['right'] = preload_right
                 preload_dict['rear'] = preload_rear
+                preload_dict['is_interactive'] = preload_is_interactive
+                preload_dict['ego_action'] = preload_ego_action
+                preload_dict['actor_type'] = preload_actor_type
+                preload_dict['actor_action'] = preload_actor_action
+                preload_dict['regulation'] = preload_regulation
                 np.save(preload_file, preload_dict)
 
             # load from npy if available
