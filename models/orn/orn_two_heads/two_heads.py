@@ -4,16 +4,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 from torch.autograd import Variable
-from model.backbone.resnet_based import resnet_two_heads
+from orn.backbone.resnet_based import resnet_two_heads
 import numpy as np
 import random
-from model.orn_two_heads.encoder import EncoderMLP
-from model.orn_two_heads.classifier import Classifier
-from model.backbone.resnet.bottleneck import Bottleneck2D, Bottleneck3D, Bottleneck2_1D
-from model.backbone.resnet.basicblock import BasicBlock2D, BasicBlock3D, BasicBlock2_1D
-from model.orn_two_heads.aggregation_relations import AggregationRelations
+from orn.orn_two_heads.encoder import EncoderMLP
+from orn.orn_two_heads.classifier import Classifier
+from orn.backbone.resnet.bottleneck import Bottleneck2D, Bottleneck3D, Bottleneck2_1D
+from orn.backbone.resnet.basicblock import BasicBlock2D, BasicBlock3D, BasicBlock2_1D
+from orn.orn_two_heads.aggregation_relations import AggregationRelations
 import math
-from model.orn_two_heads.orn import ObjectRelationNetwork
+from orn.orn_two_heads.orn import ObjectRelationNetwork
 import ipdb
 
 __all__ = [
@@ -333,28 +333,27 @@ class TwoHeads(nn.Module):
         return logits, preds_class_detected_objects
 
 
-def orn_two_heads(options, **kwargs):
+def orn_two_heads(fe):
     """Constructs a ResNet-18 model.
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
 
     # Settings
-    depth, pooling, heads, mask_size, size_2nd_head, time = options['depth'], \
-                                                            options['pooling'], \
-                                                            options['heads'], \
-                                                            14, \
-                                                            14, \
-                                                            options['t']
+    pooling, heads, mask_size, size_2nd_head, time = 'rnn', \
+                                                    'object+context', \
+                                                    14, \
+                                                    14, \
+                                                    2
 
     print("* TWO-HEADS => Object type: {} , F: {}, Heads: {}".format('coco', pooling, heads))
 
     # CNN
-    cnn = resnet_two_heads(options, **kwargs)
+    cnn = resnet_two_heads(fe)
 
     # Features dim
-    features_size = 2048 if depth > 34 else 512
-    size_RN = 512 if depth > 34 else 256
+    features_size = 2048
+    size_RN = 512
 
     # Model
     model = TwoHeads(
@@ -365,7 +364,7 @@ def orn_two_heads(options, **kwargs):
         f_orn=pooling,
         mask_size=28,
         size_2nd_head=14,
-        time=time,
-        **kwargs)
+        time=time
+        )
 
     return model

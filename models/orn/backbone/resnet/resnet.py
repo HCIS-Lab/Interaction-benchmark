@@ -1,11 +1,11 @@
 import torch.nn as nn
 import math
-from model.backbone.resnet.basicblock import BasicBlock2D
-from model.backbone.resnet.bottleneck import Bottleneck2D
-from utils.other import transform_input
+from .basicblock import BasicBlock2D
+from .bottleneck import Bottleneck2D
+# from utils.other import transform_input
 import ipdb
 import torch
-from utils.meter import *
+# from utils.meter import *
 
 model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
@@ -19,24 +19,25 @@ K_1st_CONV = 3
 
 
 class ResNet(nn.Module):
-    def __init__(self, blocks, layers, num_classes=1000, str_first_conv='2D',
+    def __init__(self, blocks, layers, num_classes=1000, str_first_conv='3D_stabilize',
                  num_final_fm=4,
                  two_heads=False,
                  size_fm_2nd_head=7,
                  blocks_2nd_head=None,
                  pooling='avg',
                  nb_temporal_conv=1,
-                 list_stride=[1, 2, 2, 2],
-                 **kwargs):
+                 list_stride=[1, 2, 2, 2]):
+
+                 # **kwargs):
         self.nb_temporal_conv = nb_temporal_conv
         self.size_fm_2nd_head = size_fm_2nd_head
-        self.two_heads = two_heads
+        self.two_heads = True
         self.inplanes = 64
         self.input_dim = 5  # from 5D to 4D tensor if 2D conv
         super(ResNet, self).__init__()
         self.num_final_fm = num_final_fm
         self.time = None
-        self._first_conv(str_first_conv)
+        self._first_conv('3D_stabilize')
         self.relu = nn.ReLU(inplace=True)
         self.list_channels = [64, 128, 256, 512]
         self.list_inplanes = []

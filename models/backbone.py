@@ -24,19 +24,34 @@ def get_maskrcnn_feature_extractor():
 # loader = transforms.Compose([
 #     transforms.ToTensor()])
 
-# # im = cv2.imread("1.jpg")
+# # # im = cv2.imread("1.jpg")
+# original_image = cv2.imread("./input.jpg")
+
+# with torch.no_grad():  # https://github.com/sphinx-doc/sphinx/issues/4258
+
+#     original_image = original_image[:, :, ::-1]
+#     # height, width = original_image.shape[:2]
+#     # image = self.aug.get_transform(original_image).apply_image(original_image)
+#     image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
+
+    # inputs = {"image": image, "height": height, "width": width}
+    # predictions = self.model([inputs])[0]
+    # return predictions
+
+
 # im = Image.open('1.jpg').convert('RGB')
 # # im = Image.fromarray(im)
 # img = loader(im).unsqueeze(0)
 # im = img.to('cuda', torch.float)
 # print(im.shape)
 # im = ImageList.from_tensors([im.cuda()])
-tensor = torch.ones([1, 3, 224, 224], dtype=torch.float32).cuda()
-model = get_maskrcnn_feature_extractor().cuda()
-# print(model.backbone.__dict__)
+# tensor = torch.ones([1, 3, 224, 224], dtype=torch.float32).cuda()
+# model = get_maskrcnn_feature_extractor().cuda()
+# model_dict = model.state_dict()
+# print(model_dict.keys())
 
-model.eval()
+# model.eval()
 
-# ResNet features
-features = model(tensor)
-print(features['res5'].shape)
+# # ResNet features
+# features = model(tensor)
+# print(features['res5'].shape)

@@ -1,7 +1,7 @@
-from model.backbone.imagenet_pretraining import load_pretrained_2D_weights
-from model.backbone.resnet.basicblock import BasicBlock2D, BasicBlock3D, BasicBlock2_1D
-from model.backbone.resnet.bottleneck import Bottleneck2D, Bottleneck3D, Bottleneck2_1D
-from model.backbone.resnet.resnet import ResNet
+from orn.backbone.imagenet_pretraining import load_pretrained_2D_weights
+from orn.backbone.resnet.basicblock import BasicBlock2D, BasicBlock3D, BasicBlock2_1D
+from orn.backbone.resnet.bottleneck import Bottleneck2D, Bottleneck3D, Bottleneck2_1D
+from orn.backbone.resnet.resnet import ResNet
 import ipdb
 
 __all__ = [
@@ -9,14 +9,14 @@ __all__ = [
 ]
 
 
-def resnet_two_heads(options, **kwargs):
+def resnet_two_heads(fe):
     """Constructs a ResNet-18 model with 2 heads
     """
     # Params
-    depth, blocks, pooling, object_head = options['depth'], \
-                                          options['blocks'], \
-                                          options['pooling'], \
-                                          options['object_head']
+    depth, blocks, pooling, object_head = 50, \
+                                          '3D_3D_3D_3D', \
+                                          'rnn', \
+                                          '3D'
 
     # Blocks and layers
     list_block, list_layers = get_cnn_features(depth=depth,
@@ -25,22 +25,27 @@ def resnet_two_heads(options, **kwargs):
                                              str_blocks=object_head)
 
     # Model with two heads
+    # model = ResNet(list_block,
+    #                list_layers,
+    #                two_heads=True,
+    #                blocks_2nd_head=blocks_object_head,
+    #                pooling=pooling, **kwargs)
+
     model = ResNet(list_block,
                    list_layers,
                    two_heads=True,
                    blocks_2nd_head=blocks_object_head,
-                   pooling=pooling, **kwargs)
-
-    print(
-        "*** Backbone: Resnet{} (blocks: {} - pooling: {} - Two heads - blocks 2nd head: {} and fm size 2nd head: {}) ***".format(
-            depth,
-            blocks,
-            pooling,
-            object_head,
-            model.size_fm_2nd_head))
+                   pooling=pooling)
+    # print(
+    #     "*** Backbone: Resnet{} (blocks: {} - pooling: {} - Two heads - blocks 2nd head: {} and fm size 2nd head: {}) ***".format(
+    #         depth,
+    #         blocks,
+    #         pooling,
+    #         object_head,
+    #         model.size_fm_2nd_head))
 
     # Pretrained from imagenet weights
-    model = load_pretrained_2D_weights('resnet{}'.format(depth), model, inflation='center')
+    model = load_pretrained_2D_weights(fe, model, inflation='center')
 
     return model
 
