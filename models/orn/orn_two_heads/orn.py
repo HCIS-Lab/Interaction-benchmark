@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import random
-from model.orn_two_heads.encoder import EncoderMLP
+from orn.orn_two_heads.encoder import EncoderMLP
 import ipdb
 
 

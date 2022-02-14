@@ -5,13 +5,13 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import torch.nn.functional as F
 from torchvision.models import resnet18, resnet50
 
-import backbone.get_maskrcnn_feature_extractor
+import backbone.get_maskrcnn_backbone
 
-class CNNLSTM(nn.Module):
+class CNNLSTM_temp(nn.Module):
     def __init__(self, num_classes):
-        super(CNNLSTM, self).__init__()
+        super(CNNLSTM_temp, self).__init__()
         self.trg_vocab_size = 38
-        self.resnet = get_maskrcnn_feature_extractor()
+        self.resnet = get_maskrcnn_backbone()
 
         self.resnet.fc = nn.Sequential(nn.Linear(2048,300))
         self.en_lstm = nn.LSTM(input_size=900, hidden_size=512, num_layers=1, batch_first=True)

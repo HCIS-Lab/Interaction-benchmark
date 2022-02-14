@@ -8,6 +8,20 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import sys
 
+
+is_interactive = {'True': 0, 'False': 1}
+ego_action = {'foward': 0, 'left_turn': 1, 'right_turn': 2, 'slide_left': 3, 'slide_right': 4,
+ 'u-turn': 5, 'backward': 6, 'crossing': 7, 'None': 8}
+actor_type = {'car': 0, 'truck': 1, 'bike': 2, 'motor': 3, 'pedestrian': 4, 'None': 5}
+actor_action = {'foward': 0, 'left_turn': 1, 'right_turn': 2, 'slide_left': 3, 'slide_right': 4,
+ 'u-turn': 5, 'stop': 6, 'backward': 7, 'crossing': 8, 'None': 9}
+regulation = {'None': 0, 'parking': 1, 'jay-walker': 2, 'running traffic light': 3, 
+'driving on a sidewalk': 4,  'stop sign': 5}
+# weather = {'ClearNoon':, 'CloudyNoon', 'WetNoon', 'WetCloudyNoon', 'MidRainyNoon', 'HardRainNoon', 'SoftRainNoon',
+#     'ClearSunset', 'CloudySunset', 'WetSunset', 'WetCloudySunset', 'MidRainSunset', 'HardRainSunset', 'SoftRainSunset',
+#     'ClearNight', 'CloudyNight', 'WetNight', 'WetCloudyNight', 'MidRainyNight', 'HardRainNight', 'SoftRainNight'}
+
+
 class Retrieval_Data(Dataset):
 
     def __init__(self, root, config):
@@ -23,29 +37,39 @@ class Retrieval_Data(Dataset):
         self.front = []
         self.left = []
         self.right = []
-        
+
+        scenarios = []
+        files = os.listdir(root)
+        for f in files:
+            fullpath = join(root, f)
+            if os.path.isdir(fullpath):
+                scenarios.append(fullpath)
+
         # iterate scenarios (town0x)
-        for sub_root in tqdm(root, file=sys.stdout):
-            preload_file = os.path.join(sub_root, 'rg_lidar_diag_pl_'+str(self.seq_len)+'_'+str(self.pred_len)+'.npy')
+        for sub_root in tqdm(scenarios, file=sys.stdout):
+            preload_file = os.path.join(sub_root, str(self.seq_len) + '.npy')
 
             # dump to npy if no preload
             if not os.path.exists(preload_file):
+                with open(os.path.join(sub_root, 'scenario_description.json')) as f:
+                scenario_description = json.load(f)
+
                 preload_front = []
                 preload_left = []
                 preload_right = []
-                preload_is_interactive = []
-                preload_ego_action = []
-                preload_actor_type = []
-                preload_actor_action = []
-                preload_regulation = []
                 # jsonfile
                 # a basis scenario
-                root_files = os.listdir(sub_root)
+                variants_path = os..path.join(sub_root, 'variants_scenarios')
+                variants = os.listdir(variants_scenarios)
                 
                 # iterate basis scenario data
-                routes = [folder for folder in root_files if not os.path.isfile(os.path.join(sub_root,folder))]
+                routes = [folder for folder in variants if not os.path.isfile(os.path.join(variants_path, folder))]
                 for route in routes:
-                    route_dir = os.path.join(sub_root, route)
+
+                    route_dir = os.path.join(variants_path, route)
+                    # with open('%s/dynamic_description.json' % (stored_path), 'w') as file:
+                    #     dynamic_description = json.load(file)
+
                     # first frame of sequence not used
                     fronts = []
                     lefts = []
@@ -62,22 +86,22 @@ class Retrieval_Data(Dataset):
                     preload_front.append(fronts)
                     preload_left.append(lefts)
                     preload_right.append(rights)
-                    preload_is_interactive.append()
-                    preload_ego_action.append()
-                    preload_actor_type.append()
-                    preload_actor_action.append()
-                    preload_regulation.append()
+
+
                 # dump to npy
                 preload_dict = {}
                 preload_dict['front'] = preload_front
                 preload_dict['left'] = preload_left
                 preload_dict['right'] = preload_right
                 preload_dict['rear'] = preload_rear
-                preload_dict['is_interactive'] = preload_is_interactive
-                preload_dict['ego_action'] = preload_ego_action
-                preload_dict['actor_type'] = preload_actor_type
-                preload_dict['actor_action'] = preload_actor_action
-                preload_dict['regulation'] = preload_regulation
+                preload_dict['is_interactive'] = is_interactive[scenario_description['interaction']]
+                preload_dict['ego_action'] = ego_action[scenario_description['my_action']]
+                preload_dict['actor_type'] = actor_type[scenario_description['interaction_actor_type']]
+                preload_dict['actor_action'] = actor_action[scenario_description['interaction_action_type']]
+                preload_dict['regulation'] = regulation[scenario_description['violation']]
+
+                # preload_dict['topology'] = scenario_description[]
+                # preload_dict['weather'] = 
                 np.save(preload_file, preload_dict)
 
             # load from npy if available
@@ -86,6 +110,12 @@ class Retrieval_Data(Dataset):
             self.left += preload_dict.item()['left']
             self.right += preload_dict.item()['right']
             self.rear += preload_dict.item()['rear']
+            self.is_interactive += preload_dict.item()['is_interactive']
+            self.ego_action += preload_dict.item()['ego_action']
+            self.actor_type += preload_dict.item()['actor_type']
+            self.regulation += preload_dict.item()['regulation']
+            # self.topology += preload_dict.item()['topology']
+            # self.weather += preload_dict.item()['weather']
             print("Preloading " + str(len(preload_dict.item()['front'])) + " sequences from " + preload_file)
 
     def __len__(self):
@@ -106,8 +136,6 @@ class Retrieval_Data(Dataset):
         seq_rears = self.rear[index]
 
 
-        pos = []
-        neg = []
         for i in range(self.seq_len):
             data['fronts'].append(torch.from_numpy(np.array(
                 scale_and_crop_image(Image.open(seq_fronts[i]), scale=self.scale, crop=self.input_resolution))))
@@ -135,28 +163,3 @@ def scale_and_crop_image(image, scale=1, crop=256):
     cropped_image = np.transpose(cropped_image, (2,0,1))
     return cropped_image
 
-
-def transform_2d_points(xyz, r1, t1_x, t1_y, r2, t2_x, t2_y):
-    """
-    Build a rotation matrix and take the dot product.
-    """
-    # z value to 1 for rotation
-    xy1 = xyz.copy()
-    xy1[:,2] = 1
-
-    c, s = np.cos(r1), np.sin(r1)
-    r1_to_world = np.matrix([[c, s, t1_x], [-s, c, t1_y], [0, 0, 1]])
-
-    # np.dot converts to a matrix, so we explicitly change it back to an array
-    world = np.asarray(r1_to_world @ xy1.T)
-
-    c, s = np.cos(r2), np.sin(r2)
-    r2_to_world = np.matrix([[c, s, t2_x], [-s, c, t2_y], [0, 0, 1]])
-    world_to_r2 = np.linalg.inv(r2_to_world)
-
-    out = np.asarray(world_to_r2 @ world).T
-    
-    # reset z-coordinate
-    out[:,2] = xyz[:,2]
-
-    return out

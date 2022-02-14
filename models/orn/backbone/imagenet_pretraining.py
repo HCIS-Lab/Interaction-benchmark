@@ -1,5 +1,5 @@
 import torch.utils.model_zoo as model_zoo
-from model.backbone.resnet.resnet import model_urls
+from orn.backbone.resnet.resnet import model_urls
 import ipdb
 import torch
 
@@ -96,9 +96,15 @@ def _keep_only_existing_keys(model, pretrained_weights_inflated):
     return model_dict
 
 
-def load_pretrained_2D_weights(arch, model, inflation):
-    pretrained_weights = model_zoo.load_url(model_urls[arch])
-    pretrained_weights_inflated = _update_pretrained_weights(model, pretrained_weights, inflation)
-    model.load_state_dict(pretrained_weights_inflated)
+def load_pretrained_2D_weights(fe, model, inflation):
+    # model.state_dict()
+    print(model.state_dict().keys())
+    print('----------------------------')
+    print(fe.keys())
+    print('----------------------------')
+    pretrained_weights = model_zoo.load_url(model_urls['resnet50'])
+    print(pretrained_weights.keys())
+    # pretrained_weights_inflated = _update_pretrained_weights(model, fe, inflation)
+    # model.load_state_dict(pretrained_weights_inflated)
     print("     -> Init: Imagenet - 3D from 2D (inflation = {})".format(inflation))
     return model
