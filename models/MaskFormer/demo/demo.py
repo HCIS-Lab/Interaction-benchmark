@@ -38,7 +38,7 @@ def setup_cfg():
     add_mask_former_config(cfg)
     cfg.merge_from_file("MaskFormer/configs/mapillary-vistas-65/maskformer_R50_bs16_300k.yaml")
     # cfg.merge_from_list(args.opts)
-    cfg.MODEL.WEIGHTS = model_final_f3fc73.pkl
+    # cfg.MODEL.WEIGHTS = 'model_final_f3fc73.pkl'
     # cfg.freeze()
     return cfg
 
