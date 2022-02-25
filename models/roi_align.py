@@ -36,6 +36,6 @@ def roi_align(img_path,img_per_batch):
         # number of objects
         size = pred_inds[i].size(dim=0)
         current_features_flat = box_features_flat[i*1000:(i+1)*1000]
-		current_features_flat = current_features_flat[pred_inds[i]]
+	current_features_flat = current_features_flat[pred_inds[i]]
         boxes = pred_instances[i]['instances'].pred_boxes
         classes = pred_instances[i]['instances'].pred_classes
