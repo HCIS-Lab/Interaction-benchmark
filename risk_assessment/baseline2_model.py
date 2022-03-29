@@ -40,7 +40,7 @@ class SADataset(Dataset):
         features = data['data_flat'][0]
         labels = data['label']
         file_name = data['file_name']
-        bboxs = data['bboxes']
+        bboxs = data['bboxes'][0]
         return features,labels,file_name,bboxs
 
     def __len__(self):
@@ -88,18 +88,18 @@ class Baseline_SA(nn.Module):
         if self.with_frame:
             self.frame_layer = nn.Sequential(
                 nn.Linear(self.frame_features_size, self.hidden_layer_size),
-                nn.ReLU(inplace=True)
+                #nn.ReLU(inplace=True)
             )
         self.object_layer = nn.Sequential(
             nn.Linear(self.features_size, self.hidden_layer_size),
-            nn.ReLU(inplace=True)
+            #nn.ReLU(inplace=True)
         )
         self.fusion_size = 2*self.hidden_layer_size if self.with_frame else self.hidden_layer_size
         self.drop = nn.Dropout(p=0.5)
         self.lstm = nn.LSTMCell(self.fusion_size, self.lstm_layer_size)
         self.output_layer = nn.Sequential(
             nn.Linear(self.lstm_layer_size, 2),
-            nn.ReLU(inplace=True),
+            #nn.ReLU(inplace=True),
 
         )
         # self.att_w = torch.normal(mean = 0,std = 0.01,size=(self.hidden_layer_size,1),requires_grad = True).to('cuda')
@@ -129,7 +129,10 @@ class Baseline_SA(nn.Module):
         hx = torch.zeros((batch_size, self.lstm_layer_size)).to('cuda')
         cx = torch.zeros((batch_size, self.lstm_layer_size)).to('cuda')
         out = []
-        zeros_object =  torch.sum(input_features.permute(1,2,0,3),3).eq(0).float().contiguous()# frame x n x b
+        zeros_object =  torch.sum(input_features.permute(1,2,0,3),3).eq(0)# frame x n x b
+        zeros_object = ~zeros_object 
+        zeros_object = zeros_object.float().contiguous()
+
         for i in range(self.time_steps):
             # img = input_frame[:,i].view(-1,self.frame_features_size)
             object = input_features[:,i].permute(1,0,2).contiguous() # nxbxc
@@ -137,10 +140,14 @@ class Baseline_SA(nn.Module):
             # img = self.frame_layer(img)
             object = self.object_layer(object) #(nxb)xh
             object = object.view(20,batch_size,self.hidden_layer_size)
-            # object = torch.matmul(object,torch.unsqueeze(zeros_object[i],2))
+            
             object = object*torch.unsqueeze(zeros_object[i],2)
             brcst_w,e = self.attention_layer(object,hx)
-            alphas = torch.mul(nn.functional.softmax(torch.sum(torch.matmul(e,brcst_w),2),0),zeros_object[i])
+            #print(torch.matmul(e,brcst_w).size())
+            #print(e.size())
+            alphas = nn.functional.softmax(torch.mul(torch.sum(torch.matmul(e,brcst_w),2),zeros_object[i]),0)
+            #print(torch.sum(torch.matmul(e,brcst_w),2).size())
+            #exit()
             attention_list = torch.mul(torch.unsqueeze(alphas,2),object)
             attention = torch.sum(attention_list,0) # b x h
             # concat frame & object
