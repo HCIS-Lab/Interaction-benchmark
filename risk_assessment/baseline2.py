@@ -12,7 +12,7 @@ import time
 # PyTorch TensorBoard support
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-
+VIDEO_PATH = '../../Anticipating-Accidents/dataset/videos/testing/positive/'
 def detection_collate(batch):
     """Custom collate fn for dealing with batches of images that have a different
     number of associated object annotations (bounding boxes).
@@ -39,11 +39,11 @@ def detection_collate(batch):
     return torch.from_numpy(data).to('cuda'), torch.from_numpy(labels).to('cuda'),file_name,bbox
 
 def training(batch_size,n_epoch,learning_rate):
-    net = baseline2_model.Baseline_SA(False).to('cuda')
+    net = baseline2_model.Baseline_SA(False,features_size=8192).to('cuda')
     net.train()
     criterion = baseline2_model.custom_loss(100)
     optimizer = optim.Adam(net.parameters(), lr=learning_rate)
-    trainset = baseline2_model.SADataset('/mnt/sdb/Dataset/SA',True)
+    trainset = baseline2_model.SADataset('/mnt/sdb/Dataset/SA_Maskformer',True)
     trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
                                           shuffle=True, num_workers=0,collate_fn=detection_collate)
     # testset = baseline2_model.SADataset('/mnt/sdb/Dataset/SA',False)
@@ -58,7 +58,7 @@ def training(batch_size,n_epoch,learning_rate):
             # get the inputs; data is a list of [inputs, labels]
             inputs,labels,_,_ = data
             # zero the parameter gradients
-            # optimizer.zero_grad()
+            optimizer.zero_grad()
             # forward + backward + optimize
             pred, prob, pred_loss= net(inputs)
             loss = criterion(pred_loss, labels)
@@ -68,12 +68,12 @@ def training(batch_size,n_epoch,learning_rate):
             # print(loss.item(),running_loss)
             # running_loss = 0.0
             print("Batch : %d/%d" % (i+1,total_batch),end='\r')
-        optimizer.step()
-        optimizer.zero_grad()
+            optimizer.step()
+        # optimizer.zero_grad()
         print('loss: %f'%(running_loss/total_batch))
         if running_loss < best_vloss:
             best_vloss = running_loss
-            model_path = 'baseline2/model_{}'.format(epoch+1)
+            model_path = 'baseline2_maskformer/model_{}'.format(epoch+1)
             print("Saving model..")
             torch.save(net.state_dict(), model_path)
     return
@@ -82,7 +82,6 @@ def demo(batch_size,model_path):
     net.load_state_dict(torch.load(model_path))
     net.to('cuda')
     net.eval()
-    print(net.parameters)
     testset = baseline2_model.SADataset('/mnt/sdb/Dataset/SA',False)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                           shuffle=True, num_workers=0,collate_fn=detection_collate)
@@ -93,39 +92,35 @@ def demo(batch_size,model_path):
             for i,label in enumerate(labels):
                 if label:
                     pred = preds[i].cpu().numpy()
-                    prob = probs[i]
+                    weight = probs[i].cpu().numpy()
                     plt.figure(figsize=(14,5))
                     plt.plot(pred[:90,1],linewidth=3.0)
                     plt.ylim(0, 1)
                     plt.ylabel('Probability')
                     plt.xlabel('Frame')
                     plt.show()
-                    continue
                     file_name = file_names[i]
                     bboxes = det[i]
-                    # new_weight = weight[:,:,i]*255
-                    pass
+                    new_weight = weight*255
                     counter = 0 
                     print(file_name)
-                    cap = cv2.VideoCapture(video_path+'00'+file_name+'.mp4') 
+                    cap = cv2.VideoCapture(VIDEO_PATH+str(file_name)) 
                     ret, frame = cap.read()
                     while(ret):
                         attention_frame = np.zeros((frame.shape[0],frame.shape[1]),dtype = np.uint8)
                         now_weight = new_weight[counter,:]
-                        new_bboxes = bboxes[counter,:,:]
-                        index = np.argsort(now_weight)
+                        new_bboxes = bboxes[counter,:]
+                        # index = np.argsort(now_weight)
                         # print(now_weight)
-                        for num_box in index:
+                        for num_box in range(20):
                             if now_weight[num_box]/255.0>0.4:
-                                cv2.rectangle(frame,(new_bboxes[num_box,1],new_bboxes[num_box,0]),(new_bboxes[num_box,3],new_bboxes[num_box,2]),(0,255,0),3)
+                                cv2.rectangle(frame,(int(new_bboxes[num_box,0]),int(new_bboxes[num_box,1])),(int(new_bboxes[num_box,2]),int(new_bboxes[num_box,3])),(0,255,0),3)
                             else:
-                                cv2.rectangle(frame,(new_bboxes[num_box,1],new_bboxes[num_box,0]),(new_bboxes[num_box,3],new_bboxes[num_box,2]),(255,0,0),2)
+                                cv2.rectangle(frame,(int(new_bboxes[num_box,0]),int(new_bboxes[num_box,1])),(int(new_bboxes[num_box,2]),int(new_bboxes[num_box,3])),(255,0,0),2)
                             font = cv2.FONT_HERSHEY_SIMPLEX
-                            cv2.putText(frame,str(round(now_weight[num_box]/255.0*10000)/10000),(new_bboxes[num_box,1],new_bboxes[num_box,0]), font, 0.5,(0,0,255),1,cv2.LINE_AA)
-                            attention_frame[int(new_bboxes[num_box,0]):int(new_bboxes[num_box,2]),int(new_bboxes[num_box,1]):int(new_bboxes[num_box,3])] = now_weight[num_box]
-                            
-                            cv2.putText(frame,str(num_box),(int(new_bboxes[num_box,3]),int(new_bboxes[num_box,2])), font, 1,(0,0,255),1,cv2.LINE_AA)
-
+                            cv2.putText(frame,str(round(now_weight[num_box]/255.0*10000)/10000),(int(new_bboxes[num_box,0]),int(new_bboxes[num_box,1])), font, 0.5,(0,0,255),1,cv2.LINE_AA)
+                            attention_frame[int(new_bboxes[num_box,1]):int(new_bboxes[num_box,3]),int(new_bboxes[num_box,0]):int(new_bboxes[num_box,2])] = now_weight[num_box]
+                            # cv2.putText(frame,str(num_box),(int(new_bboxes[num_box,3]),int(new_bboxes[num_box,2])), font, 1,(0,0,255),1,cv2.LINE_AA)
                         attention_frame = cv2.applyColorMap(attention_frame, cv2.COLORMAP_HOT)
                         dst = cv2.addWeighted(frame,0.6,attention_frame,0.4,0)
                         cv2.putText(dst,str(counter+1),(10,30), font, 1,(255,255,255),3)
@@ -142,9 +137,9 @@ def demo(batch_size,model_path):
 
 
 if __name__ == '__main__':
-    learning_rate = 0.0001
+    learning_rate = 0.001
     batch_size = 10
     n_epoch = 40
-    model_path = 'baseline2/model_0'
+    model_path = 'baseline2/model_40'
     training(batch_size,n_epoch,learning_rate)
     # demo(batch_size,model_path)
