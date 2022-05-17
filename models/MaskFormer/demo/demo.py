@@ -59,10 +59,10 @@ def test_opencv_video_format(codec, file_ext):
         return False
 
 def get_maskformer(mapillary_pretrained=True):
-    cfg = setup_cfg()
-    demo = VisualizationDemo(cfg)
-    model = demo.predictor.model
-    # args.opts['MODEL.WEIGHTS'] = 'model_final_f3fc73.pkl'
+#     cfg = setup_cfg()
+#     demo = VisualizationDemo(cfg)
+#     model = demo.predictor.model
+#     args.opts['MODEL.WEIGHTS'] = 'model_final_f3fc73.pkl'
 
     cfg = setup_cfg(args)
     if mapillary_pretrained:
