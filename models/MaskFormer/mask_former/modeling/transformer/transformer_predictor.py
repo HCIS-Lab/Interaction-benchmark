@@ -140,6 +140,35 @@ class TransformerPredictor(nn.Module):
             out["pred_masks"] = outputs_seg_masks
         return out
 
+    def get_mlp_features(self, x, mask_features):
+        pos = self.pe_layer(x)
+
+        src = x
+        mask = None
+        hs, _ = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos)
+
+        # if self.mask_classification:
+        #     outputs_class = self.class_embed(hs)
+        #     out = {"pred_logits": outputs_class[-1]}
+        # else:
+        #     out = {}
+
+        if self.aux_loss:
+            # [l, bs, queries, embed]
+            mask_embed = self.mask_embed(hs)
+            # outputs_seg_masks = torch.einsum("lbqc,bchw->lbqhw", mask_embed, mask_features)
+            # out["pred_masks"] = outputs_seg_masks[-1]
+            # out["aux_outputs"] = self._set_aux_loss(
+            #     outputs_class if self.mask_classification else None, outputs_seg_masks
+            # )
+        else:
+            # FIXME h_boxes takes the last one computed, keep this in mind
+            # [bs, queries, embed]
+            mask_embed = self.mask_embed(hs[-1])
+            # outputs_seg_masks = torch.einsum("bqc,bchw->bqhw", mask_embed, mask_features)
+            # out["                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         "] = outputs_seg_masks
+        return mask_embed
+
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_seg_masks):
         # this is a workaround to make torchscript happy, as torchscript
