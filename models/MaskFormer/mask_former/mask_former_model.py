@@ -135,6 +135,27 @@ class MaskFormer(nn.Module):
     def device(self):
         return self.pixel_mean.device
 
+    def get_backbone_features(self, batched_inputs):
+        images = [x["image"].to(self.device) for x in batched_inputs]
+        images = [(x - self.pixel_mean) / self.pixel_std for x in images]
+        images = ImageList.from_tensors(images, self.size_divisibility)
+        features = self.backbone(images.tensor)
+        return features
+
+    def get_mlp_features(self, batched_inputs):
+        features = self.get_backbone_features(batched_inputs)
+        mlp_features = self.sem_seg_head.get_mlp_features(features)
+        return mlp_features
+
+    def get_fpn_features(self, batched_inputs):
+        """
+            Return:
+                [mask(p2),p2,p3,p4,p5]
+        """
+        features = self.get_backbone_feature(batched_inputs)
+        fpn_features = self.sem_seg_head.pixel_decoder.get_fpn_features(features)
+        return fpn_features
+
     def forward(self, batched_inputs):
         """
         Args:
