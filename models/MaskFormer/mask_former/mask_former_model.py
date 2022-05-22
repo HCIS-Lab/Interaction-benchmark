@@ -152,7 +152,7 @@ class MaskFormer(nn.Module):
             Return:
                 [mask(p2),p2,p3,p4,p5]
         """
-        features = self.get_backbone_feature(batched_inputs)
+        features = self.get_backbone_features(batched_inputs)
         fpn_features = self.sem_seg_head.pixel_decoder.get_fpn_features(features)
         return fpn_features
 
