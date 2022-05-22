@@ -117,3 +117,15 @@ class MaskFormerHead(nn.Module):
         else:
             predictions = self.predictor(features[self.transformer_in_feature], mask_features)
         return predictions
+    
+    def get_mlp_features(self, features):
+        mask_features, transformer_encoder_features = self.pixel_decoder.forward_features(features)
+        if self.transformer_in_feature == "transformer_encoder":
+            assert (
+                transformer_encoder_features is not None
+            ), "Please use the TransformerEncoderPixelDecoder."
+            mlp_features = self.predictor.get_mlp_features(transformer_encoder_features, mask_features)
+        else:
+            mlp_features = self.predictor.get_mlp_features(features[self.transformer_in_feature], mask_features)
+        
+        return mlp_features
