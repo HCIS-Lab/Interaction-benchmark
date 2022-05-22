@@ -141,6 +141,23 @@ class BasePixelDecoder(nn.Module):
                 y = output_conv(y)
         return self.mask_features(y), None
 
+    def get_fpn_features(self, features):
+        out = []
+        for idx, f in enumerate(self.in_features[::-1]):
+            x = features[f]
+            lateral_conv = self.lateral_convs[idx]
+            output_conv = self.output_convs[idx]
+            if lateral_conv is None:
+                y = output_conv(x)
+            else:
+                cur_fpn = lateral_conv(x)
+                # Following FPN implementation, we use nearest upsampling here
+                y = cur_fpn + F.interpolate(y, size=cur_fpn.shape[-2:], mode="nearest")
+                y = output_conv(y)
+            out.insert(0,y)
+        out.insert(0,self.mask_features(y))
+        return out
+
     def forward(self, features, targets=None):
         logger = logging.getLogger(__name__)
         logger.warning("Calling forward() may cause unpredicted behavior of PixelDecoder module.")
