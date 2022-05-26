@@ -14,60 +14,94 @@ import json
 class Retrieval_Data(Dataset):
 
     def __init__(self, 
-                seq_len=20, 
-                step=6,
+                seq_len=8, 
+                step=9,
+                training=True,
+                is_top=False,
+                front_only=True,
                 root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'):
         
-        self.seq_len = config.seq_len
-        self.pred_len = config.pred_len
-
+        self.is_top = is_top
+        self.front_only = front_only
+        self.id = []
+        self.variants = []
         self.front = []
         self.left = []
         self.right = []
+        self.top = []
+        self.road_class = []
+        self.gt_ego = []
+        self.gt_actor = []
 
-        with open('retrieval_interactive_gt.json') as f:
-            gt_interactive = json.load(f)
-        # with open('retrieval_non-interactive_gt.json') as f:
-        #     gt_non_interactive = json.load(f)
-        # with open('retrieval_collision_gt.json') as f:
-        #     gt_collision = json.load(f)
-        # with open('retrieval_obstacle_gt.json') as f:
-        #     gt_obstacle = json.load(f)
+        self.seq_len = seq_len
+        type_list = ['non-interactive_t']
 
-        type = 'interactive'
-        basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
+        for t, type in enumerate(type_list):
+            basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
 
-        # iterate scenarios
-        for s in tqdm(basic_scenarios, file=sys.stdout):
-            # a basic scenario
-            scenario_id = s.split('/'[-1])
-            road_class, gt_ego, gt_actor = get_class(gt_interactive, scenario_id)
+            # iterate scenarios
+            print('searching data')
+            for s in tqdm(basic_scenarios, file=sys.stdout):
+                # a basic scenario
+                scenario_id = s.split('/')[-1]
+                if training and scenario_id.split('_')[0] != '10' or not training and scenario_id.split('_')[0] == '10':
 
-            variants_path = os.path.join(s, 'variants_scenarios')
-            variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path)]
-            
-            for v in variants:
-                # first frame of sequence not used
-                fronts = []
-                lefts = []
-                rights = []
+                    # if road_class != 5:
+                    variants_path = os.path.join(s, 'variant_scenario')
+                    variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path)]
+                    
+                    for v in variants:
+                        # first frame of sequence not used
+                        fronts = []
+                        lefts = []
+                        rights = []
+                        tops = []
+                        # a data sample
+                        start = 90
+                        for i in range(start, start + seq_len*step, step):
+                            # images
+                            filename = f"{str(i).zfill(8)}.png"
+                            if self.is_top:
+                                tops.append(v+"/rgb/top/"+filename)
+                            else:
+                                fronts.append(v+"/rgb/front/"+filename)
+                                if not self.front_only:
+                                    lefts.append(v+"/rgb/left/"+filename)
+                                    rights.append(v+"/rgb/right/"+filename)
 
-                # a data sample
-                for i in range(0, self.seq_len*step, step):
-                    # images
-                    filename = f"{str(self.seq_len+1+i).zfill(4)}.png"
-                    fronts.append(v+"/rgb/front/"+filename)
-                    lefts.append(v+"/rgb/left/"+filename)
-                    rights.append(v+"/rgb/right/"+filename)
+                        v_id = v.split('/')[-1]
+                        if os.path.isfile(v+'/retrive_gt.txt'):
+                            with open(v+'/retrive_gt.txt') as f:
+                                gt = []
 
-                self.id += s.split('/')[-1]
-                self.variants += v.split('/')[-1]
-                self.front += fronts
-                self.left += lefts
-                self.right += rights
-                self.road_class += road_class
-                self.gt_ego += gt_ego
-                self.gt_actor += gt_actor
+                                for line in f:
+                                    line = line.replace('\n', '')
+                                    if line != '\n':
+                                        gt.append(line)
+                                gt = list(set(gt))
+                                if 'None' in gt:
+                                    continue
+
+                            try:
+                                road_class, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id)
+                            except:
+                                continue
+                        else:
+                            continue
+
+                        self.id.append(s.split('/')[-1])
+                        self.variants.append(v.split('/')[-1])
+                        if self.is_top:
+                            self.top.append(tops)
+                        else:    
+                            self.front.append(fronts)
+                            if not self.front_only:
+                                self.left.append(lefts)
+                                self.right.append(rights)
+
+                        self.road_class.append(road_class)
+                        self.gt_ego.append(gt_ego)
+                        self.gt_actor.append(gt_actor)
             # print("Preloading " + str(len(preload_dict.item()['front'])) + " sequences from " + preload_file)
 
     def __len__(self):
@@ -80,28 +114,35 @@ class Retrieval_Data(Dataset):
         data['fronts'] = []
         data['lefts'] = []
         data['rights'] = []
+        data['tops'] = []
         data['road'] = self.road_class[index]
         data['ego'] = self.gt_ego[index]
         data['actor'] = self.gt_actor[index]
         data['id'] = self.id[index]
 
-        seq_fronts = self.front[index]
-        seq_lefts = self.left[index]
-        seq_rights = self.right[index]
-
+        if self.is_top:
+            seq_tops = self.top[index]
+        else:
+            seq_fronts = self.front[index]
+            if not self.front_only:
+                seq_lefts = self.left[index]
+                seq_rights = self.right[index]
 
         for i in range(self.seq_len):
-            data['fronts'].append(torch.from_numpy(np.array(
-                scale_and_crop_image(Image.open(seq_fronts[i])))))
-            if not self.ignore_sides:
-                data['lefts'].append(torch.from_numpy(np.array(
-                    scale_and_crop_image(Image.open(seq_lefts[i])))))
-                data['rights'].append(torch.from_numpy(np.array(
-                    scale_and_crop_image(Image.open(seq_rights[i])))))
-
+            if self.is_top:
+                data['tops'].append(torch.from_numpy(np.array(
+                    scale_and_crop_image(Image.open(seq_tops[i]).convert('RGB')))))
+            else:
+                data['fronts'].append(torch.from_numpy(np.array(
+                    scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
+                if not self.front_only:
+                    data['lefts'].append(torch.from_numpy(np.array(
+                        scale_and_crop_image(Image.open(seq_lefts[i]).convert('RGB')))))
+                    data['rights'].append(torch.from_numpy(np.array(
+                        scale_and_crop_image(Image.open(seq_rights[i]).convert('RGB')))))
         return data
 
-def scale_and_crop_image(image, scale=0.5, crop=256):
+def scale_and_crop_image(image, scale=2.0, crop=256):
     """
     Scale and crop a PIL image, returning a channels-first numpy array.
     """
@@ -117,82 +158,65 @@ def scale_and_crop_image(image, scale=0.5, crop=256):
     
     return cropped_image
 
-def get_class(gt_dict, id):        
+
+def get_multi_class(gt_list, s_id, v_id):   
     road_type = {'i-': 0, 't1': 1, "t2": 2, "t3": 3, 's-': 4, 'r-': 5}
 
-    ego_4way = {'z1-z1': 0, 'z1-z2': 1, 'z1-z3':2, 'z1-z4':3}
-    4way_label = {'z1-z1': 0, 'z1-z2': 1, 'z1-z3':2, 'z1-z4':3,
-                    'z2-z1': 4, 'z2-z2':5, 'z2-z3': 6, 'z2-z4': 7,
-                    'z3-z1': 8, 'z3-z2': 9, 'z3-z3': 10, 'z3-z4': 11,
-                    'z4-z1': 12, 'z4-z2': 13, 'z4-z3': 14, 'z4-z4': 15,
-                    'c1-c2': 16, 'c1-c4': 17,
-                    'c2-c1': 18, 'c2-c3': 19,
-                    'c3-c2': 20, 'c3-c4': 21,
-                    'c4-c1': 22, 'c4-c3': 23,
-                    '': 24}
+    ego_table = {'e:z1-z1': 0, 'e:z1-z2': 1, 'e:z1-z3':2, 'e:z1-z4': 3,
+                    'e:s-s': 4, 'e:s-sl': 5, 'e:s-sr': 6,
+                    'e:ri-r1': 7, 'e:r1-r2': 8, 'e:r1-ro':9}
 
-    ego_3way_1 = {'t1-t1': 0, 't1-t2': 1, 't1-t4': 2}
-    3way_1_label = {'t1-t1': 0, 't1-t2': 1, 't1-t4': 2, 
-                    't2-t1': 3, 't2-t2': 4, 't2-t4': 5,
-                    't4-t1': 6, 't4-t2': 7, 't4-t4': 8,
-                    'c1-cf': 9, 'c1-c4': 10,
-                    'cf-c1': 11, 'cf-c4': 12,
-                    'c4-c1': 13, 'c4-cf': 14
-                    '': 15}
+    actor_table = {'c:1-1': 0, 'c:1-2': 1, 'c:1-3':2, 'c:1-4':3,
+                    'c:2-1': 4, 'c:2-2':5, 'c:2-3': 6, 'c:2-4': 7,
+                    'c:3-1': 8, 'c:3-2': 9, 'c:3-3': 10, 'c:3-4': 11,
+                    'c:4-1': 12, 'c:4-2': 13, 'c:4-3': 14, 'c:4-4': 15,
 
-    ego_3way_2 = {'t1-t1': 0, 't1-t2': 1, 't1-t3': 2}
-    3way_2_label = {'t1-t1': 0, 't1-t2': 1, 't1-t3': 2,
-                    't2-t1': 3, 't2-t2': 4, 't2-t3': 5,
-                    't3-t1': 6, 't3-t2': 7, 't3-t3': 8,
-                    'c1-c2': 9, 'c1-cl': 10,
-                    'c2-c1': 11, 'c2-cl': 12,
-                    'cl-c1': 13, 'cl-c2': 14,
-                    '': 15}
+                    'b:1-1': 16, 'b:1-2': 17, 'b:1-3': 18, 'b:1-4': 19,
+                    'b:2-1': 20, 'b:2-2':21, 'b:2-3': 22, 'b:2-4': 23,
+                    'b:3-1': 24, 'b:3-2': 25, 'b:3-3': 26, 'b:3-4': 27,
+                    'b:4-1': 28, 'b:4-2': 29, 'b:4-3': 30, 'b:4-4': 31,
 
-    ego_3way_3 = {'t1-t1': 0, 't1-t3': 1, 't1-t4': 2}
-    3way_3_label = {'t1-t1': 0, 't1-t3': 1, 't1-t4': 2,
-                    't3-t1': 3, 't3-t3': 4, 't3-t4': 5,
-                    't4-t1': 6, 't4-t3': 7, 't4-t4': 8,
-                    'c3-c4': 9, 'c3-cr': 10,
-                    'c4-c3': 11, 'c4-cr': 12,
-                    'cr-c3': 13, 'cr-c4': 14,
-                    '': 15}
+                    'c:s-s': 32, 'c:s-sl': 33, 'c:s-sr': 34,
+                    'c:sl-s': 35, 'c:sl-sl': 36,
+                    'c:sr-s': 37, 'c:sr-sr': 38,
+                    'c:jl-jr': 39, 'c:jr-jl': 40,
 
-    ego_straight = {'s-s': 0, 's-sl': 1, 's-sr': 2}
-    straight_label = {'s-s': 0, 's-sl': 1, 's-sr': 2,
-                        'sl-s': 3,
-                        'sr-s': 4,
-                        'jl-s': 5, 'jl-sl': 6, 'jl-jr': 7
-                        'jr-s': 8, 'jr-sr': 9, 'jr-jl': 10,
-                        '': 11}
+                    'b:s-s': 41, 'b:s-sl': 42, 'b:s-sr': 43,
+                    'b:sl-s': 44, 'b:sl-sl': 45,
+                    'b:sr-s': 46, 'b:sr-sr': 47,
+                    'b:jl-jr': 48, 'b:jr-jl': 49,
 
-    road_class = class_text.split('_')[1][:2]
+                    'p:c1-c2': 50, 'p:c1-c4': 51, 'p:c1-cr': 52,  'p:c1-cf': 53,
+                    'p:c2-c1': 54, 'p:c2-c3': 55, 'p:c2-cl': 56,
+                    'p:c3-c2': 57, 'p:c3-c4': 58, 'p:c3-cr': 59,
+                    'p:c4-c1': 60, 'p:c4-c3': 61, 'p:c4-cr': 62, 'p:c4-cf': 63,
+                    'p:cf-c1': 64, 'p:cf-c4': 65,
+                    'p:cl-c1': 66, 'p:cl-c2': 67,
+                    'p:cr-c3': 68, 'p:cr-c4': 69,
+
+                    'c:ri-r1': 70, 'c:rl-r1': 71, 'c:r1-r2': 72, 'c:r1-ro': 73, 'c:ri-r2': 74,
+                    'b:ri-r1': 75, 'b:rl-r1': 76, 'b:r1-r2': 77, 'b:r1-ro': 78, 'b:ri-r2': 79}
+
+    road_class = s_id.split('_')[1][:2]
     road_class = road_type[road_class]
+    actor_class = [0]*80
+    for gt in gt_list:
+        gt = gt.lower()
+        if gt[0] == 'e':
+            ego_class = ego_table[gt]
+        else:
+            actor_class[actor_table[gt]] = 1
+    if ego_class == None:
+        return
 
-    class_text = gt_dict[id]
-    ego_class, actor_class = class_text.split(',')[0], class_text.split(',')[1]
-
-    if road_class == 0:
-        ego_class = ego_4way[ego_class]
-        actor_class = 4way_label[actor_class]
-
-    elif road_class == 1:
-        ego_class = ego_3way_1[ego_class]
-        actor_class = 3way_3_label[actor_class]
-
-    elif road_class == 2:
-        ego_class = ego_3way_2[ego_class]
-        actor_class = 3way_2_label[actor_class]
-
-    elif road_class == 3:
-        ego_class = ego_3way_3[ego_class]
-        actor_class = 3way_3_label[actor_class]
-
-    elif road_class == 4:
-        ego_class = ego_straight[ego_class]
-        actor_class = straight_label[actor_class]
-
-    return road_class, ego_class, actor_class
+    ego_label = torch.tensor(ego_class)
+    actor_label = torch.FloatTensor(actor_class)
+    # print(ego_label)
+    # ego_ind = ego_table[ego_class]
+    # actor_ind = actor_table[actor_class]
+    # ego_label[ego_ind] = torch.FloatTensor([1.0])
+    # actor_label[actor_ind] = torch.FloatTensor([1.0])
+    return road_class, ego_label, actor_label
 
 
 
