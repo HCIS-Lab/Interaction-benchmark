@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 import sys
 import json 
-
+import random
 
 
 class Retrieval_Data(Dataset):
@@ -19,10 +19,12 @@ class Retrieval_Data(Dataset):
                 training=True,
                 is_top=False,
                 front_only=True,
+                viz=False,
                 root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'):
         
         self.is_top = is_top
         self.front_only = front_only
+        self.viz = viz
         self.id = []
         self.variants = []
         self.front = []
@@ -34,7 +36,7 @@ class Retrieval_Data(Dataset):
         self.gt_actor = []
 
         self.seq_len = seq_len
-        type_list = ['non-interactive_t']
+        type_list = ['interactive_t','non-interactive_t']
 
         for t, type in enumerate(type_list):
             basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
@@ -51,26 +53,22 @@ class Retrieval_Data(Dataset):
                     variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path)]
                     
                     for v in variants:
-                        # first frame of sequence not used
-                        fronts = []
-                        lefts = []
-                        rights = []
-                        tops = []
-                        # a data sample
-                        start = 90
-                        for i in range(start, start + seq_len*step, step):
-                            # images
-                            filename = f"{str(i).zfill(8)}.png"
-                            if self.is_top:
-                                tops.append(v+"/rgb/top/"+filename)
-                            else:
-                                fronts.append(v+"/rgb/front/"+filename)
-                                if not self.front_only:
-                                    lefts.append(v+"/rgb/left/"+filename)
-                                    rights.append(v+"/rgb/right/"+filename)
 
+                        # get retrieval label
                         v_id = v.split('/')[-1]
-                        if os.path.isfile(v+'/retrive_gt.txt'):
+                        if os.path.isfile(v+'/retrieve_gt.txt'):
+                            with open(v+'/retrieve_gt.txt') as f:
+                                gt = []
+
+                                for line in f:
+                                    line = line.replace('\n', '')
+                                    if line != '\n':
+                                        gt.append(line)
+                                gt = list(set(gt))
+                                if 'None' in gt:
+                                    continue
+
+                        elif os.path.isfile(v+'/retrive_gt.txt'):
                             with open(v+'/retrive_gt.txt') as f:
                                 gt = []
 
@@ -82,12 +80,48 @@ class Retrieval_Data(Dataset):
                                 if 'None' in gt:
                                     continue
 
-                            try:
-                                road_class, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id)
-                            except:
-                                continue
                         else:
                             continue
+
+                        try:
+                            road_class, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id)
+                        except:
+                            continue
+
+                        # first frame of sequence not used
+                        fronts = []
+                        lefts = []
+                        rights = []
+                        tops = []
+                        # a data sample
+
+                        # start = 60
+                        
+                        # for i in range(start, start + seq_len*step, step):
+                        #     # images
+                        #     filename = f"{str(i).zfill(8)}.png"
+                        #     if self.is_top:
+                        #         tops.append(v+"/rgb/top/"+filename)
+                        #     else:
+                        #         if os.path.isfile(v+"/rgb/front/"+filename):
+                        #             fronts.append(v+"/rgb/front/"+filename)
+                        #         if not self.front_only:
+                        #             if os.path.isfile(v+"/rgb/left/"+filename):
+                        #                 lefts.append(v+"/rgb/left/"+filename)
+                        #             if os.path.isfile(v+"/rgb/right/"+filename):
+                        #                 rights.append(v+"/rgb/right/"+filename)
+
+                        # if len(fronts) != seq_len and self.front_only:
+                        #     continue
+                        # if (len(rights) != seq_len or len(lefts) != seq_len) and not self.front_only:
+                        #     continue
+
+                        fronts = [v+"/rgb/front/"+ img for img in os.listdir(v+"/rgb/front/") if isfile(v+"/rgb/front/"+ img)]
+                        fronts = fronts.sort()
+                        # rights = [v+"/rgb/right/"+ img for img in os.listdir(v+"/rgb/right/") if isfile(v+"/rgb/right/"+ img)]
+                        # rights = rights.sort()
+                        # lefts = [v+"/rgb/left/"+ img for img in os.listdir(v+"/rgb/left/") if isfile(v+"/rgb/left/"+ img)]
+                        # lefts = lefts.sort()
 
                         self.id.append(s.split('/')[-1])
                         self.variants.append(v.split('/')[-1])
@@ -119,6 +153,8 @@ class Retrieval_Data(Dataset):
         data['ego'] = self.gt_ego[index]
         data['actor'] = self.gt_actor[index]
         data['id'] = self.id[index]
+        if self.viz:
+            data['img_front'] = []
 
         if self.is_top:
             seq_tops = self.top[index]
@@ -128,21 +164,43 @@ class Retrieval_Data(Dataset):
                 seq_lefts = self.left[index]
                 seq_rights = self.right[index]
 
-        for i in range(self.seq_len):
-            if self.is_top:
-                data['tops'].append(torch.from_numpy(np.array(
-                    scale_and_crop_image(Image.open(seq_tops[i]).convert('RGB')))))
-            else:
-                data['fronts'].append(torch.from_numpy(np.array(
-                    scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
-                if not self.front_only:
-                    data['lefts'].append(torch.from_numpy(np.array(
-                        scale_and_crop_image(Image.open(seq_lefts[i]).convert('RGB')))))
-                    data['rights'].append(torch.from_numpy(np.array(
-                        scale_and_crop_image(Image.open(seq_rights[i]).convert('RGB')))))
+        # for i in range(self.seq_len):
+        #     if self.is_top:
+        #         data['tops'].append(torch.from_numpy(np.array(
+        #             scale_and_crop_image(Image.open(seq_tops[i]).convert('RGB')))))
+        #     else:
+        #         data['fronts'].append(torch.from_numpy(np.array(
+        #             scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
+        #         if self.viz:
+        #             data['img_front'].append(np.array((Image.open(seq_fronts[i]).convert('RGB'))))
+        #         if not self.front_only:
+        #             data['lefts'].append(torch.from_numpy(np.array(
+        #                 scale_and_crop_image(Image.open(seq_lefts[i]).convert('RGB')))))
+        #             data['rights'].append(torch.from_numpy(np.array(
+        #                 scale_and_crop_image(Image.open(seq_rights[i]).convert('RGB')))))
+        total_frame_num = len(seq_fronts)
+        step = total_frame_num // (self.seq_len-1)
+        num_smaple = total_frame_num % step
+        start_idx = random.randint(0, num_smaple-1)
+
+        iter = 0
+        while(len(data['fronts']) == self.seq_len and iter < num_smaple):
+            iter += 1
+            data['fronts'] = []
+            for i in range(start_idx, total_frame_num, step):
+                if os.path.isfile(seq_fronts[i]):
+                    data['fronts'].append(torch.from_numpy(np.array(
+                            scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
+                else:
+                    (start_idx += 1) % num_smaple
+                    break
+
+        if len(data[fronts]) != self.seq_len:
+            print('failure data name:')
+            print(data['id'])
         return data
 
-def scale_and_crop_image(image, scale=2.0, crop=256):
+def scale_and_crop_image(image, scale=4.0, crop=256):
     """
     Scale and crop a PIL image, returning a channels-first numpy array.
     """

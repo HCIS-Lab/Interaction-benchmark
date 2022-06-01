@@ -20,15 +20,21 @@ sys.path.append('/home/hankung/Desktop/Interaction_benchmark/models')
 
 # from .configs.config import GlobalConfig
 import retrieval_data
-import cnnlstm_image
+# import cnnlstm_image
+import cnnlstm_backbone
+import slowfast
 # import cnnlstm_seg
 
-# from pytorch_grad_cam import GradCAM
+from sklearn.metrics import average_precision_score, f1_score
+# from torchmetrics import F1Score
+
+from pytorch_grad_cam import GradCAM
 # from pytorch_grad_cam.utils.image import show_cam_on_image, \
 #                                          deprocess_image, \
 #                                          preprocess_image
 
 # import cnnlstm_backbone
+from model import generate_model
 
 torch.cuda.empty_cache()
 
@@ -77,6 +83,8 @@ class Engine(object):
 
 	def train(self):
 		loss_epoch = 0.
+		ce_loss_epoch = 0.
+		bce_loss_epoch = 0.
 		num_batches = 0
 		model.train()
 		# Train loop
@@ -110,15 +118,20 @@ class Engine(object):
 			ego = data['ego'].to(args.device)
 			actor = torch.FloatTensor(data['actor']).to(args.device)
 
-			pred_ego, pred_actor = model(fronts+lefts+rights+tops)
+			pred_ego, pred_actor = model.train_forward(fronts+lefts+rights+tops)
 
 
-			pred_actor = F.sigmoid(pred_actor)
+			pred_actor = torch.sigmoid(pred_actor)
 			ce = nn.CrossEntropyLoss().cuda()
-			bce = nn.BCELoss(weight=None, size_average=True).cuda()
-			loss = (ce(pred_ego, ego) + bce(pred_actor, actor))/2
+			bce = nn.BCELoss(weight=None, reduction='mean').cuda()
+			ce_loss = ce(pred_ego, ego)
+			bce_loss = bce(pred_actor, actor)
+			loss = (ce_loss+bce_loss)/2
 			loss.backward()
+
 			loss_epoch += float(loss.item())
+			ce_loss_epoch += float(ce_loss.item())
+			bce_loss_epoch += float(bce_loss.item())
 
 			num_batches += 1
 			optimizer.step()
@@ -128,7 +141,14 @@ class Engine(object):
 		
 		
 		loss_epoch = loss_epoch / num_batches
+		ce_loss_epoch = ce_loss_epoch / num_batches
+		bce_loss_epoch = bce_loss_epoch / num_batches
+		print('total loss')
 		print(loss_epoch)
+		print('ce loss:')
+		print(ce_loss_epoch)
+		print('bce loss:')
+		print(bce_loss_epoch)
 		self.train_loss.append(loss_epoch)
 		self.cur_epoch += 1
 
@@ -143,11 +163,9 @@ class Engine(object):
 
 			correct_ego = 0
 			correct_actor = 0
-			if cam:
-				grayscale_cam = cam(input_tensor=input_tensor,
-	                        target_category=None,
-	                        aug_smooth=True,
-	                        eigen_smooth=True)
+			mean_f1 = 0
+			actors = []
+			actors_label = []
 
 			# Validation loop
 			for batch_num, data in enumerate(tqdm(dataloader_val), 0):
@@ -177,25 +195,58 @@ class Engine(object):
 				ego = data['ego'].to(args.device)
 				actor = torch.FloatTensor(data['actor']).to(args.device)
 
-				pred_ego, pred_actor = model(fronts+lefts+rights+tops)
+				pred_ego, pred_actor = model.train_forward(fronts+lefts+rights+tops)
 
-				pred_actor = F.sigmoid(pred_actor)
+				pred_actor = torch.sigmoid(pred_actor)
 				ce = nn.CrossEntropyLoss().cuda()
-				bce = nn.BCELoss(weight=None, size_average=True).cuda()
+				bce = nn.BCELoss(weight=None, reduction='mean').cuda()
 				loss = (ce(pred_ego, ego) + bce(pred_actor, actor))/2
 
+				if cam:
+					# viz
+					model.train()
+					cam.batch_size = 32
+					input_tensor = torch.cat(fronts+lefts+rights+tops, dim=0)
+					print(input_tensor.shape)
+					grayscale_cam = cam(input_tensor=input_tensor)
+
+					# In this example grayscale_cam has only one image in the batch:
+					grayscale_cam = grayscale_cam[0, :]
+					visualization = show_cam_on_image(data['img_front'], grayscale_cam, use_rgb=True)
+					model.eval()
 				num_batches += 1
 
 				_, pred_ego = torch.max(pred_ego.data, 1)
 				pred_actor = pred_actor > 0.5
+				actors.append(actor.detach().cpu().numpy())
+				actors_label.append(pred_actor.detach().cpu().numpy())
 
+				mean_f1 += f1_score(
+					actor.detach().cpu().numpy(), 
+					pred_actor.detach().cpu().numpy(),
+					average='macro',
+					zero_=0)
 				total_ego += ego.size(0)
-				total_actor += actor.size(0) * actor.size(1)
-				correct_ego += (pred_ego == ego).sum().item()
-				correct_actor += (pred_actor == actor).sum().item()
-			print(f'Accuracy of the ego: {100 * correct_ego // total_ego} %')
-			print(f'Accuracy of the actor: {100 * correct_actor // total_actor} %')
 
+
+				# total_actor += actor.size(0) * actor.size(1)
+			# 	total_actor_pos += actor.sum().item()
+				correct_ego += (pred_ego == ego).sum().item()
+			# 	correct_actor += (pred_actor == actor).sum().item()
+
+			actors = np.stack(actors, axis=0)
+			print(actors.shape)
+			actors_label = np.stack(actors_label, axis=0)
+			mean_f1 = f1_score(
+					actors, 
+					actors_label,
+					average='macro',
+					zero_division=0)
+
+			print(f'Accuracy of the ego: {100 * correct_ego // total_ego} %')
+			# print(f'Accuracy of the actor: {100 * correct_actor // total_actor} %')
+			print('f1:')
+			print(mean_f1)
 
 					
 			loss = loss / float(num_batches)
@@ -244,8 +295,8 @@ class Engine(object):
 
 # Config
 # config = GlobalConfig()
-seq_len = 8
-step = 5
+seq_len = 32
+step = 2
 is_top = args.top
 front_only = args.front_only
 num_ego_class = 10
@@ -259,19 +310,19 @@ else:
 
 # Data
 train_set = retrieval_data.Retrieval_Data(seq_len=seq_len, step=step, is_top=is_top, front_only=front_only)
-val_set = retrieval_data.Retrieval_Data(seq_len=seq_len, step=step, training=False, is_top=is_top, front_only=front_only)
+val_set = retrieval_data.Retrieval_Data(seq_len=seq_len, step=step, training=False, is_top=is_top, front_only=front_only, viz=args.viz)
 # print(val_set)
 dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
-# dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
+dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
 
 # Model
-
-model = cnnlstm_image.CNNLSTM(num_cam, num_ego_class, num_actor_class).cuda()
+model = generate_model(args.id, num_cam, num_ego_class, num_actor_class).cuda()
+# model = slowfast.resnet50(num_ego_class=num_ego_class, num_actor_class=num_actor_class)
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
 trainer = Engine(top=is_top)
 
-for param in model.backbone.parameters():
-    param.requires_grad = False
+# for param in model.backbone.parameters():
+#     param.requires_grad = False
 if args.seg:
 	for param in model.seg.parameters():
 	    param.requires_grad = False
@@ -283,7 +334,7 @@ print ('Total trainable parameters: ', params)
 
 if args.viz:
 	cam = GradCAM(model=model, 
-		           target_layer=model.conv1,
+		           target_layers=model.slow_res5,
 		           use_cuda=True)
 	cam.batch_size = 1
 else:
@@ -316,8 +367,8 @@ with open(os.path.join(args.logdir, 'args.txt'), 'w') as f:
 if not args.test:
 	for epoch in range(trainer.cur_epoch, args.epochs): 
 		trainer.train()
-		# if epoch % args.val_every == 0: 
-		# 	trainer.validate(cam)
-		# 	trainer.save()
+		if epoch % args.val_every == 0: 
+			trainer.validate(cam)
+			trainer.save()
 else:
 	trainer.validate(cam=cam)
