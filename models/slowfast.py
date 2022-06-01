@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from retrieval_head import Head
 
 
 
@@ -52,7 +53,7 @@ class Bottleneck(nn.Module):
 
 
 class SlowFast(nn.Module):
-    def __init__(self, block=Bottleneck, layers=[3, 4, 6, 3], class_num=10, dropout=0.5 ):
+    def __init__(self, num_ego_class, num_actor_class, block=Bottleneck, layers=[3, 4, 6, 3], class_num=10, dropout=0.5):
         super(SlowFast, self).__init__()
 
         self.fast_inplanes = 8
@@ -86,14 +87,31 @@ class SlowFast(nn.Module):
         self.slow_res5 = self._make_layer_slow(
             block, 512, layers[3], stride=2, head_conv=3)
         self.dp = nn.Dropout(dropout)
-        self.fc = nn.Linear(self.fast_inplanes+2048, class_num, bias=False)
-    def forward(self, input):
+        # self.fc = nn.Linear(self.fast_inplanes+2048, class_num, bias=False)
+        self.head = Head(self.fast_inplanes+2048, num_ego_class, num_actor_class)
+
+    def train_forward(self, input):
+        seq_len = len(input)
+        batch_size = input[0].shape[0]
+        w, h = input[0].shape[2], input[0].shape[3]
+        input = torch.stack(input, dim=0).view(batch_size, 3, seq_len, w, h)
         fast, lateral = self.FastPath(input[:, :, ::2, :, :])
         slow = self.SlowPath(input[:, :, ::16, :, :], lateral)
         x = torch.cat([slow, fast], dim=1)
         x = self.dp(x)
-        x = self.fc(x)
-        return x
+        ego, actor = self.head(x)
+        return ego, actor
+
+    def forward(self, input):
+        seq_len = len(input)
+        w, h = input.shape[2], input.shape[3]
+        input = input.view(1, 3, seq_len, w, h)
+        fast, lateral = self.FastPath(input[:, :, ::2, :, :])
+        slow = self.SlowPath(input[:, :, ::16, :, :], lateral)
+        x = torch.cat([slow, fast], dim=1)
+        x = self.dp(x)
+        _, actor = self.head(x)
+        return actor
 
 
 
@@ -182,10 +200,10 @@ class SlowFast(nn.Module):
 
 
 
-def resnet50(**kwargs):
+def resnet50(num_ego_class, num_actor_class, **kwargs):
     """Constructs a ResNet-50 model.
     """
-    model = SlowFast(Bottleneck, [3, 4, 6, 3], **kwargs)
+    model = SlowFast(num_ego_class, num_actor_class, Bottleneck, [3, 4, 6, 3], **kwargs)
     return model
 
 
