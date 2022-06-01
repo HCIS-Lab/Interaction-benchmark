@@ -9,7 +9,7 @@ from retrieval_head import Head
 
 
 class CNNLSTM(nn.Module):
-    def __init__(self, num_cam):
+    def __init__(self, num_cam, num_ego_class, num_actor_class):
         super(CNNLSTM, self).__init__()
         self.num_cam = num_cam
         self.backbone = get_maskformer().backbone
@@ -30,7 +30,32 @@ class CNNLSTM(nn.Module):
         
         self.pool = nn.AdaptiveAvgPool2d((1,1))
 
-        self.head = Head(256, 4, 25)
+        self.head = Head(256, num_ego_class, num_actor_class)
+
+    def train_forward(self, inputs, tops=False, front_only=True):
+        hidden = None
+        seq_len = len(inputs)//self.num_cam
+        batch_size = inputs[0].shape[0]
+
+        w, h = inputs[0].shape[2], inputs[0].shape[3]
+
+        for t in range(seq_len):
+            x = inputs[t]
+
+            if isinstance(x, list):
+                x = torch.stack(x, dim=0)
+            x.view(batch_size*self.num_cam, 3, w, h)
+            x = normalize_imagenet(x)
+            x = self.backbone(x)['res5']
+            x = self.conv1(x)
+            x = self.conv2(x)
+            x = self.pool(x)
+            x = torch.flatten(x, 1)
+
+            out, hidden = self.en_lstm(x.view(batch_size, 1, 256), hidden)
+
+        ego, actor = self.head(out[:, -1, :])
+        return ego, actor
 
     def forward(self, fronts, lefts, rights, tops=False):
         hidden = None
@@ -63,4 +88,16 @@ class CNNLSTM(nn.Module):
 
         ego, actor = self.head(out[:, -1, :])
         return ego, actor
+
+def normalize_imagenet(x):
+    """ Normalize input images according to ImageNet standards.
+    Args:
+        x (tensor): input images
+    """
+    x = x.clone()
+    x[:, 0] = (x[:, 0] - 0.485) / 0.229
+    x[:, 1] = (x[:, 1] - 0.456) / 0.224
+    x[:, 2] = (x[:, 2] - 0.406) / 0.225
+    return x
+
         
