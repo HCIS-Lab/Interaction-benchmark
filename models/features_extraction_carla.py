@@ -80,17 +80,15 @@ def get_features(root_path, object_per_frame, batch_n):
                             frame = torch.as_tensor(frame.astype("float32").transpose(2, 0, 1))
                             inputs.append({"image": frame, "height": height, "width": width})
                             i += 1
-                        print(i)
                         roi_batch, bbox_batch = run_model([maskformer,model],inputs,batch_n)
-                        time.sleep(2)
                         if roi_tensor is None:
                             roi_tensor = roi_batch
                             bbox_tensor = bbox_batch
                         else:
                             roi_tensor = torch.cat((roi_tensor,roi_batch))
                             bbox_tensor = torch.cat((bbox_tensor,bbox_batch))
-                    print(roi_batch.shape)
-                    print(bbox_tensor.shape)
+                    # print(roi_batch.shape)
+                    # print(bbox_tensor.shape)
                     torch.save(roi_tensor,os.path.join(curr_path,'features','roi.pt'))
                     torch.save(bbox_tensor,os.path.join(curr_path,'features','bbox.pt'))
                     return
