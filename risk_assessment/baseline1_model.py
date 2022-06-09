@@ -218,6 +218,7 @@ class Baseline_Jinkyu(nn.Module):
         h = self.drop(h)
         h_logits = self.w_h(h)
         h_logits += self.w_ctx2out(context)
+        h_logits = self.relu(h_logits)
         h_logits = self.drop(h_logits)
         out_logits = self.w_out(h_logits)
         return out_logits
