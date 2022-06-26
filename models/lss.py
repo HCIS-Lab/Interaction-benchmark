@@ -137,11 +137,12 @@ class BevEncode(nn.Module):
         return x
 
 
-class LiftSplatShoot(nn.Module):
-    def __init__(self, grid_conf, data_aug_conf, outC):
-        super(LiftSplatShoot, self).__init__()
+class LSS(nn.Module):
+    def __init__(self, grid_conf, data_aug_conf, outC, scale=2, num_cam=1):
+        super(LSS, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
+        self.num_cam = num_cam
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'],
                               self.grid_conf['ybound'],
@@ -161,69 +162,30 @@ class LiftSplatShoot(nn.Module):
         # toggle using QuickCumsum vs. autograd
         self.use_quickcumsum = True
 
-        intrin = torch.Tensor([[float(5), float(0), float(640)], 
-                               [float(0), float(5), float(360)], 
-                               [float(0), float(0), float(1)]])
 
-        tran = [torch.Tensor([float(2.71), float(0), float(0)]),
-                    torch.Tensor([float(2.71), float(0), float(0)]),
-                    torch.Tensor([float(2.71), float(0), float(0)])
-                    ]
+        h, w = 720, 1280
+        h, w = 720//scale, 1280//scale
+        h, w = h//2, w//2
 
-        rot = [torch.Tensor(Quaternion([float(0.5), float(-0.5), float(0.5), float(-0.5)]).rotation_matrix),
+        self.intrins = [torch.Tensor([[float(5), float(0), float(w)], 
+                                       [float(0), float(5), float(h)], 
+                                       [float(0), float(0), float(1)]]),
+                        torch.Tensor([[float(5), float(0), float(w)], 
+                                       [float(0), float(5), float(h)], 
+                                       [float(0), float(0), float(1)]]),
+                        torch.Tensor([[float(5), float(0), float(w)], 
+                                       [float(0), float(5), float(h)], 
+                                       [float(0), float(0), float(1)]])]
+        self.trans = [torch.Tensor([float(2.71671180725), float(0), float(0)]),
+                torch.Tensor([float(2.71671180725), float(0), float(0)]),
+                torch.Tensor([float(2.71671180725), float(0), float(0)])]
+        self.rots = [torch.Tensor(Quaternion([float(0.5), float(-0.5), float(0.5), float(-0.5)]).rotation_matrix),
                     torch.Tensor(Quaternion([float(0.67), float(-0.67), float(0.21), float(-0.21)]).rotation_matrix),
                     torch.Tensor(Quaternion([float(0.21), float(-0.21), float(0.67), float(-0.67)]).rotation_matrix),
                     ]
-
-        imgs = []
-        rots = []
-        trans = []
-        intrins = []
-        post_rots = []
-        post_trans = []
-
-        img_path = os.path.join(self.samples[index]['path'], self.samples[index]['scene'])
-        # tf_path = os.path.join(self.samples[index]['path'], 'transformation')
-
-        for i, cam in enumerate(cams):
-            # read image
-            imgname = os.path.join(img_path, cam, "{:08d}".format(self.samples[index]['frame']) + '.png')
-
-            img = Image.open(imgname)
-            post_rot = torch.eye(2)
-            post_tran = torch.zeros(2)
-
-            intrin = intrin_new
-            tran = tran_new[i]
-            rot = rot_new[i]
-
-            # augmentation (resize, crop, horizontal flip, rotate)
-            resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
-            # img, post_rot2, post_tran2 = img_transform(img, post_rot, post_tran,
-            #                                          resize=resize,
-            #                                          resize_dims=resize_dims,
-            #                                          crop=crop,
-            #                                          flip=flip,
-            #                                          rotate=rotate,
-            #                                          )
-            img, post_rot2, post_tran2 = img, post_rot2, post_tran
-
-            # for convenience, make augmentation matrices 3x3
-            post_tran = torch.zeros(3)
-            post_rot = torch.eye(3)
-            post_tran[:2] = post_tran2
-            post_rot[:2, :2] = post_rot2
-
-            imgs.append(normalize_img(img.convert('RGB')))
-            intrins.append(intrin)
-            rots.append(rot)
-            trans.append(tran)
-            post_rots.append(post_rot)
-            post_trans.append(post_tran)
-
-
-         rots, trans, intrins, post_rots, post_trans = 
-         torch.stack(rots), torch.stack(trans), torch.stack(intrins), torch.stack(post_rots), torch.stack(post_trans)
+        self.intrins = torch.stack(self.intrins)
+        self.trans = torch.stack(self.intrins)
+        self.rots = torch.stack(self.intrins)
 
     def create_frustum(self):
         # make grid in image plane
@@ -331,9 +293,10 @@ class LiftSplatShoot(nn.Module):
         # Driving parameters
         return segs
 
-    def features(self, imgs, rots, trans, intrins, post_rots, post_trans):
+    def features(self, imgs):
+
         # BEV segmentation
-        imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
+        imgs = self.get_voxels(imgs, self.rots, self.trans, self.intrins, post_rots, post_trans)
         f = self.bevencode.features(imgs)
         # Driving parameters
         return f

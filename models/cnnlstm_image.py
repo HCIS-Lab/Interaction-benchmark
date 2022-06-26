@@ -55,7 +55,7 @@ class CNNLSTM(nn.Module):
 
             if isinstance(x, list):
                 x = torch.stack(x, dim=0)
-            x.view(batch_size*self.num_cam, 3, w, h)
+            x = x.view(batch_size*self.num_cam, 3, w, h)
             x = normalize_imagenet(x)
             x = self.backbone_features(x)
             x = self.conv1(x)
@@ -69,32 +69,52 @@ class CNNLSTM(nn.Module):
         ego, actor = self.head(out[:, -1, :])
         return ego, actor
 
-    def forward(self, inputs, tops=False, front_only=True):
+    def forward(self, x, tops=False, front_only=True):
+        # hidden = None
+        # seq_len = len(inputs)//self.num_cam
+        # batch_size = inputs[0].shape[0]
+
+        # w, h = inputs[0].shape[2], inputs[0].shape[3]
+
+        # for t in range(seq_len):
+        #     x = inputs[t]
+
+        #     if isinstance(x, list):
+        #         x = torch.stack(x, dim=0)
+        #     x.view(batch_size*self.num_cam, 3, w, h)
+        #     x = normalize_imagenet(x)
+        #     x = self.backbone_features(x)
+        #     x = self.conv1(x)
+        #     x = self.avgpool(x)
+        #     x = x.view(batch_size, 1, 512*self.num_cam)
+        #     x = self.fc(x)
+        #     x = self.relu(x)
+
+        #     out, hidden = self.en_lstm(x, hidden)
+
+        # _, actor = self.head(out[:, -1, :])
+        # return actor
+
         hidden = None
-        seq_len = len(inputs)//self.num_cam
-        batch_size = inputs[0].shape[0]
+        x = normalize_imagenet(x)
+        x = x.repeat(16, 1, 1, 1)
+        x = self.backbone_features(x)
+        x = self.conv1(x)
+        x = self.avgpool(x)
+        # x = x.chunk(16)
+        for t in range(16):
+            x_t = x[t]
+            x_t = x_t.view(1, 1, 512)
+            x_t = self.fc(x_t)
+            x_t = self.relu(x_t)
+            out, hidden = self.en_lstm(x_t, hidden)
+        # x = x.view(batch_size, 1, 512*self.num_cam)
+        # x = self.fc(x)
+        # x = self.relu(x)
 
-        w, h = inputs[0].shape[2], inputs[0].shape[3]
-
-        for t in range(seq_len):
-            x = inputs[t]
-
-            if isinstance(x, list):
-                x = torch.stack(x, dim=0)
-            x.view(batch_size*self.num_cam, 3, w, h)
-            x = normalize_imagenet(x)
-            x = self.backbone_features(x)
-            x = self.conv1(x)
-            x = self.avgpool(x)
-            x = x.view(batch_size, 1, 512*self.num_cam)
-            x = self.fc(x)
-            x = self.relu(x)
-
-            out, hidden = self.en_lstm(x, hidden)
-
-        _, actor = self.head(out[:, -1, :])
+        # _, actor = self.head(out[:, -1, :])
+        actor = self.head(out[:, -1, :])
         return actor
-
 def normalize_imagenet(x):
     """ Normalize input images according to ImageNet standards.
     Args:
