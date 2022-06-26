@@ -103,13 +103,13 @@ class SlowFast(nn.Module):
         return ego, actor
 
     def forward(self, input):
+        print(shape)
         seq_len = len(input)
         w, h = input.shape[2], input.shape[3]
         input = input.view(1, 3, seq_len, w, h)
         fast, lateral = self.FastPath(input[:, :, ::2, :, :])
         slow = self.SlowPath(input[:, :, ::16, :, :], lateral)
         x = torch.cat([slow, fast], dim=1)
-        x = self.dp(x)
         _, actor = self.head(x)
         return actor
 
