@@ -30,16 +30,19 @@ class Retrieval_Data(Dataset):
                 num_cam=1,
                 root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'):
         
+        self.training = training
         self.is_top = is_top
         self.front_only = front_only
         self.seg = seg
         self.viz = viz
         self.id = []
         self.variants = []
+
         self.front_list = []
         self.left_list = []
         self.right_list = []
         self.top_list = []
+
         self.road_para = []
         self.gt_ego = []
         self.gt_actor = []
@@ -98,7 +101,7 @@ class Retrieval_Data(Dataset):
                         
                         # a data sample
 
-                        if self.front_only and os.path.isdir(v+"/rgb/front/"):
+                        if not self.is_top and os.path.isdir(v+"/rgb/front/"):
                             check_data = [v+"/rgb/front/"+ img for img in os.listdir(v+"/rgb/front/") if os.path.isfile(v+"/rgb/front/"+ img)]
                             check_data.sort()
 
@@ -137,25 +140,36 @@ class Retrieval_Data(Dataset):
                                 else:
                                     if os.path.isfile(v+"/rgb/front/"+filename):
                                         front_temp.append(v+"/rgb/front/"+filename)
-                                    if not self.front_only:
-                                        if os.path.isfile(v+"/rgb/left/"+filename):
-                                            lefts.append(v+"/rgb/left/"+filename)
-                                        if os.path.isfile(v+"/rgb/right/"+filename):
-                                            rights.append(v+"/rgb/right/"+filename)
+                                        if not self.front_only:
+                                            if os.path.isfile(v+"/rgb/left/"+filename):
+                                                left_temp.append(v+"/rgb/left/"+filename)
+                                            else:
+                                                break
+                                            if os.path.isfile(v+"/rgb/right/"+filename):
+                                                right_temp.append(v+"/rgb/right/"+filename)
+                                            else:
+                                                break
+
                                 if not self.is_top and len(front_temp) == seq_len and self.front_only:
                                     break
+                                if not self.is_top and not self.front_only and \
+                                len(front_temp) == seq_len and len(left_temp) == seq_len and len(right_temp) == seq_len:
+                                    break
+
                                 if self.is_top and len(tops) == seq_len:
                                     break
-                            if not self.is_top and self.front_only and len(front_temp) == seq_len:
+                            if not self.is_top and len(front_temp) == seq_len:
                                 fronts.append(front_temp)
-
+                                if not self.front_only:
+                                    lefts.append(left_temp)
+                                    rights.append(right_temp)
 
                             if self.is_top and len(tops) == seq_len:
                                 break
                             else:
                                 tops = []
 
-                        if not self.is_top and self.front_only and len(fronts) == 0:
+                        if not self.is_top and len(fronts) == 0:
                             continue
 
                         if self.is_top and len(tops) != seq_len:
@@ -173,8 +187,8 @@ class Retrieval_Data(Dataset):
                         else:  
                             self.front_list.append(fronts)
                             if not self.front_only:
-                                self.left.append(lefts)
-                                self.right.append(rights)
+                                self.left_list.append(lefts)
+                                self.right_list.append(rights)
 
                         self.road_para.append(road_para)
                         self.gt_ego.append(gt_ego)
@@ -212,7 +226,10 @@ class Retrieval_Data(Dataset):
         data['variants'] = self.variants[index]
 
         if not self.is_top:
-            sample_idx = random.randint(0, len(self.front_list[index])-1)
+            if self.training:
+                sample_idx = random.randint(0, len(self.front_list[index])-1)
+            else:
+                sample_idx = len(self.front_list[index])//2
 
         if self.viz:
             data['img_front'] = []
@@ -222,8 +239,8 @@ class Retrieval_Data(Dataset):
         else:
             seq_fronts = self.front_list[index][sample_idx]
             if not self.front_only:
-                seq_lefts = self.left[index]
-                seq_rights = self.right[index]
+                seq_lefts = self.left_list[index][sample_idx]
+                seq_rights = self.right_list[index][sample_idx]
 
 
         if self.lss:
