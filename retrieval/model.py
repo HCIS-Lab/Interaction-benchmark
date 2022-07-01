@@ -12,6 +12,7 @@ import arg
 import cnnlstm_backbone
 import cnnpool
 import fpnlstm
+import convlstm
 
 
 
@@ -21,6 +22,8 @@ def generate_model(model_name, num_cam, num_ego_class, num_actor_class, seq_len,
 		model = cnnlstm_image.CNNLSTM(num_cam, num_ego_class, num_actor_class)
 	elif model_name == 'cnnlstm_maskformer':
 		model = cnnlstm_backbone.CNNLSTM_maskformer(num_cam, num_ego_class, num_actor_class, road)
+	elif model_name == 'convlstm':
+		model = convlstm.ConvLstm(num_cam, num_ego_class, num_actor_class, road)
 	elif model_name == 'fpnlstm':
 		model = fpnlstm.FPNLSTM(num_cam, num_ego_class, num_actor_class, road)
 	elif model_name == 'cnnpool':

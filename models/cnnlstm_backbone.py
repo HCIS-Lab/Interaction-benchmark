@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import torch.nn.functional as F
 from MaskFormer.demo.demo import get_maskformer
 from retrieval_head import Head, Road_Head
+from convlstm import ConvLSTM
 
 
 class CNNLSTM_maskformer(nn.Module):
@@ -16,13 +17,13 @@ class CNNLSTM_maskformer(nn.Module):
 
         self.conv1 = nn.Sequential(
                 nn.ReLU(inplace=False),
-                nn.Conv2d(2048*self.num_cam, 1024*self.num_cam, kernel_size=1, stride=1, padding='same'),
+                nn.Conv2d(2048*self.num_cam, 1024*self.num_cam, kernel_size=3, stride=1, padding='same'),
                 nn.BatchNorm2d(1024*self.num_cam),
                 nn.ReLU(inplace=False),
-                nn.Conv2d(1024*self.num_cam, 1024, kernel_size=1, stride=1, padding='same'),
+                nn.Conv2d(1024*self.num_cam, 1024, kernel_size=3, stride=1, padding='same'),
                 nn.BatchNorm2d(1024),
                 nn.ReLU(inplace=False),
-                nn.Conv2d(1024, 512, kernel_size=1, stride=1, padding='same'),
+                nn.Conv2d(1024, 512, kernel_size=3, stride=1, padding='same'),
                 nn.BatchNorm2d(512)
                     )
 
@@ -38,6 +39,7 @@ class CNNLSTM_maskformer(nn.Module):
 
         self.en_lstm = nn.LSTM(input_size=256, hidden_size=256, num_layers=1, batch_first=True)
 
+        # self.en_lstm = ConvLSTM(256, 256, 3, 1, True, True, True)
         self.pool = nn.AdaptiveAvgPool2d((1,1))
 
         self.head = Head(256, num_ego_class, num_actor_class)
@@ -63,12 +65,12 @@ class CNNLSTM_maskformer(nn.Module):
                 )
 
 
-    def train_forward(self, x, tops=False, front_only=True):
+    def train_forward(self, x):
 
         hidden, hidden_road = None, None
         seq_len = len(x)//self.num_cam
-        batch_size = x[0].shape[0]
 
+        batch_size = x[0].shape[0]
         h, w = x[0].shape[2], x[0].shape[3]
 
         out_road = []
@@ -80,11 +82,11 @@ class CNNLSTM_maskformer(nn.Module):
                 x_i = torch.reshape(x_i, (batch_size*self.num_cam, 3, h, w))
                 # x_i = x_i.view(batch_size, self.num_cam, 3, h, w)
             with torch.no_grad():
-                x_i= (x_i - self.backbone.pixel_mean) / self.backbone.pixel_std
+                x_i = (x_i - self.backbone.pixel_mean) / self.backbone.pixel_std
                 x_i = self.backbone.backbone(x_i)['res5']
                 down_h, down_w = x_i.shape[-2], x_i.shape[-1]
                 # x_i = torch.permute(x_i, (1,0,2,3,4))
-                x_i = x_i.view(batch_size, -1, down_h, down_w)
+                x_i = torch.reshape(x_i, (batch_size, -1, down_h, down_w))
             x_i = self.conv1(x_i)
             x_feature_i = self.conv2(x_i)
             
@@ -100,7 +102,7 @@ class CNNLSTM_maskformer(nn.Module):
 
             if self.road:
                 x_road_i = self.pool(x_road_i)
-                x_road_i = x_road_i.view(batch_size*self.num_cam, 256)
+                x_road_i = x_road_i.view(batch_size, 256)
                 out_road.append(x_road_i)
                             # out_road, hidden_road = self.en_road_lstm(x_road_i, hidden_road)
             out, hidden = self.en_lstm(x_feature_i, hidden)
@@ -108,8 +110,12 @@ class CNNLSTM_maskformer(nn.Module):
 
         ego, actor = self.head(out[:, -1, :])
         if self.road:
+            # print(len(out_road))
+            # print(out_road[0].shape)
             out_road = torch.stack(out_road, 0)
+            # print(out_road.shape)
             out_road = out_road.view(batch_size*seq_len, 256)
+            # print(out_road.shape)
             out_road = self.road_fc(out_road)
             # out_road = self.road_fc(out_road[:, -1, :])
             return ego, actor, out_road

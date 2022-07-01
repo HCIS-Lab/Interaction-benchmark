@@ -84,7 +84,7 @@ class Engine(object):
 		
 	"""
 
-	def __init__(self,  cur_epoch=0, cur_iter=0, side=False, top=False, front_only=True, bce_weight=1, road_topo=False):
+	def __init__(self,  cur_epoch=0, cur_iter=0, top=False, front_only=False, bce_weight=1, road_topo=False):
 		self.cur_epoch = cur_epoch
 		self.cur_iter = cur_iter
 		self.bestval_epoch = cur_epoch
@@ -131,6 +131,7 @@ class Engine(object):
 					if not self.front_only:
 						lefts.append(lefts_in[i].to(args.device, dtype=torch.float32))
 						rights.append(rights_in[i].to(args.device, dtype=torch.float32))
+
 			# labels
 			road = torch.FloatTensor(data['road_para']).to(args.device)
 			batch_size = road.shape[0]
@@ -514,14 +515,14 @@ else:
 train_set = retrieval_data.Retrieval_Data(seq_len=seq_len, is_top=is_top, front_only=front_only, scale=args.scale, seg=args.seg, lss=args.lss, num_cam=num_cam)
 val_set = retrieval_data.Retrieval_Data(seq_len=seq_len, training=False, is_top=is_top, front_only=front_only, scale=args.scale, viz=args.viz, seg=args.seg, lss=args.lss, num_cam=num_cam)
 # print(val_set)
-dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=8, pin_memory=True)
+dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
 dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
 
 # Model
 model = generate_model(args.id, num_cam, num_ego_class, num_actor_class, args.seq_len, args.road).cuda()
 
 optimizer = optim.Adam(model.parameters(), lr=args.lr)
-trainer = Engine(top=is_top, bce_weight=args.bce, road_topo=args.road)
+trainer = Engine(top=is_top, bce_weight=args.bce, road_topo=args.road, front_only=args.front_only)
 
 if args.viz:
 	# cam = GradCAM(model=model, 
