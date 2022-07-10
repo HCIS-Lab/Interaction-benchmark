@@ -16,37 +16,16 @@ def resnet_two_heads(fe):
     depth, blocks, pooling, object_head = 50, \
                                           '3D_3D_3D_3D', \
                                           'rnn', \
-                                          '3D'
-
-    # Blocks and layers
+                                          '2D'
     list_block, list_layers = get_cnn_features(depth=depth,
                                                str_blocks=blocks)
     blocks_object_head, _ = get_cnn_features(depth=depth,
                                              str_blocks=object_head)
 
-    # Model with two heads
-    # model = ResNet(list_block,
-    #                list_layers,
-    #                two_heads=True,
-    #                blocks_2nd_head=blocks_object_head,
-    #                pooling=pooling, **kwargs)
-
-    model = ResNet(list_block,
-                   list_layers,
-                   two_heads=True,
-                   blocks_2nd_head=blocks_object_head,
-                   pooling=pooling)
-    # print(
-    #     "*** Backbone: Resnet{} (blocks: {} - pooling: {} - Two heads - blocks 2nd head: {} and fm size 2nd head: {}) ***".format(
-    #         depth,
-    #         blocks,
-    #         pooling,
-    #         object_head,
-    #         model.size_fm_2nd_head))
-
-    # Pretrained from imagenet weights
-    model = load_pretrained_2D_weights(fe, model, inflation='center')
-
+    model = ORN_ResNet(
+                list_layers,
+                two_heads=True,
+                pooling=pooling)
     return model
 
 

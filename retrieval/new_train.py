@@ -19,11 +19,8 @@ sys.path.append('/home/hankung/Desktop/Interaction_benchmark/config')
 sys.path.append('/home/hankung/Desktop/Interaction_benchmark/models')
 
 # from .configs.config import GlobalConfig
-import retrieval_data
-# import cnnlstm_image
-import cnnlstm_backbone
-import slowfast
-# import cnnlstm_seg
+import feature_data
+
 
 from sklearn.metrics import average_precision_score, precision_score, f1_score, recall_score, accuracy_score, hamming_loss
 # from torchmetrics import F1Score
@@ -512,8 +509,9 @@ else:
 
 
 # Data
-train_set = retrieval_data.Retrieval_Data(seq_len=seq_len, is_top=is_top, front_only=front_only, scale=args.scale, seg=args.seg, lss=args.lss, num_cam=num_cam)
-val_set = retrieval_data.Retrieval_Data(seq_len=seq_len, training=False, is_top=is_top, front_only=front_only, scale=args.scale, viz=args.viz, seg=args.seg, lss=args.lss, num_cam=num_cam)
+
+train_set = feature_data.Feature_Data(seq_len=seq_len, is_top=is_top, front_only=front_only, scale=args.scale, seg=args.seg, lss=args.lss, num_cam=num_cam)
+val_set = feature_data.Feature_Data(seq_len=seq_len, training=False, is_top=is_top, front_only=front_only, scale=args.scale, viz=args.viz, seg=args.seg, lss=args.lss, num_cam=num_cam)
 # print(val_set)
 dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
 dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)

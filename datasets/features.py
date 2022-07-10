@@ -44,8 +44,16 @@ def scale(image, scale=4.0):
 
 torch.cuda.empty_cache()
 
+
+# parser = argparse.ArgumentParser()
+# parser.add_argument('--model', type=str, default='r5')
+# args = parser.parse_args()
+# print(args)
+
+# if args.model == 'r5':
+#     model = get_maskformer().cuda()
  
-scale=4
+scale=2
 root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'
         
 scale = float(scale)
@@ -53,8 +61,9 @@ scale = float(scale)
 type_list = ['non-interactive']
 
 
-model = get_maskformer().backbone.cuda()
-
+model = get_maskformer().cuda()
+print(model.pixel_mean)
+print(model.pixel_std)
 model.eval()
 for t, type in enumerate(type_list):
     basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
@@ -67,7 +76,7 @@ for t, type in enumerate(type_list):
 
         # if road_class != 5:
         variants_path = os.path.join(s, 'variant_scenario')
-        variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path)]
+        variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path) if os.path.isdir(os.path.join(variants_path, v))]
         
         for v in variants:
             
@@ -77,32 +86,36 @@ for t, type in enumerate(type_list):
             lefts = []
             rights = []
             tops = []
-
-            if not os.path.isdir(v+"/rgb_f/"):
-                    os.mkdir(v+"/rgb_f/")
+            f_path = v+"/rgb_f/" + '_'+str(int(scale))
+            if not os.path.isdir(f_path):
+                os.mkdir(f_path)
 
             if os.path.isdir(v+"/rgb/front/"):
                 fronts = [v+"/rgb/front/"+ img for img in os.listdir(v+"/rgb/front/") if os.path.isfile(v+"/rgb/front/"+ img)]
-                if not os.path.isdir(v+"/rgb_f/front/"):
-                    os.mkdir(v+"/rgb_f/front/")
-                n_fronts = [v+"/rgb_f/front/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
+                if not os.path.isdir(f_path + "/front/"):
+                    os.mkdir(f_path + "/front/")
+                n_fronts = [f_path + "/front/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
             # ---------------------
             if os.path.isdir(v+"/rgb/right/"):
                 rights = [v+"/rgb/right/"+ img for img in os.listdir(v+"/rgb/right/") if os.path.isfile(v+"/rgb/right/"+ img)]
-                if not os.path.isdir(v+"/rgb_f/right/"):
-                    os.mkdir(v+"/rgb_f/right/")
-                n_rights = [v+"/rgb_f/right/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/right/")]
+                if not os.path.isdir(f_path + "/right/"):
+                    os.mkdir(f_path + "/right/")
+                n_rights = [f_path +"/right/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/right/")]
             # -----------------------
             if os.path.isdir(v+"/rgb/left/"):
                 lefts = [v+"/rgb/left/"+ img for img in os.listdir(v+"/rgb/left/") if os.path.isfile(v+"/rgb/left/"+ img)]
-                if not os.path.isdir(v+"/rgb_f/left/"):
-                    os.mkdir(v+"/rgb_f/left/")
-                n_lefts = [v+"/rgb_f/left/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/left/")]
+                if not os.path.isdir(f_path + "/left/"):
+                    os.mkdir(f_path + "/left/")
+                n_lefts = [f_path +"/left/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/left/")]
 
             front_tensor = []
             for i in range(len(fronts)):
-                front_tensor.append(torch.from_numpy(np.array(
-                    scale_and_crop_image(Image.open(fronts[i]).convert('RGB'), scale))).float())
+                try:
+                    front_tensor.append(torch.from_numpy(np.array(
+                        scale_and_crop_image(Image.open(fronts[i]).convert('RGB'), scale))).float())
+                except:
+                    print(fronts[i])
+
             left_tensor = []
             for i in range(len(lefts)):
                 left_tensor.append(torch.from_numpy(np.array(
@@ -111,14 +124,18 @@ for t, type in enumerate(type_list):
             for i in range(len(rights)):
                 right_tensor.append(torch.from_numpy(np.array(
                     scale_and_crop_image(Image.open(rights[i]).convert('RGB'), scale))).float())
+            try:
+                front_tensor = torch.stack(front_tensor)
+                left_tensor = torch.stack(left_tensor)
+                right_tensor = torch.stack(right_tensor)
+            except:
+                print('empty stack')
+                continue
 
-            front_tensor = torch.stack(front_tensor)
-            left_tensor = torch.stack(left_tensor)
-            right_tensor = torch.stack(right_tensor)
-
-            front_tensor = front_tensor.cuda()
+            front_tensor = front_tensor.to('cuda', dtype=torch.float32)
             with torch.no_grad():   
-                features = model(front_tensor)['res5']
+                front_tensor = (front_tensor - model.pixel_mean) / model.pixel_std
+                features = model.backbone(front_tensor)['res5']
 
             for i in range(features.shape[0]):
                 f = features[i,:,:,:]
@@ -126,9 +143,10 @@ for t, type in enumerate(type_list):
                 np.save(n_fronts[i], f)
 
             # ---------------------------------------------
-            left_tensor = left_tensor.cuda()
+            left_tensor = left_tensor.to('cuda', dtype=torch.float32)
             with torch.no_grad():   
-                features = model(left_tensor)['res5']
+                left_tensor = (left_tensor - model.pixel_mean) / model.pixel_std
+                features = model.backbone(left_tensor)['res5']
 
             for i in range(features.shape[0]):
                 f = features[i,:,:,:]
@@ -136,9 +154,10 @@ for t, type in enumerate(type_list):
                 np.save(n_lefts[i], f)
 
             # ---------------------------------------------
-            right_tensor = right_tensor.cuda()
+            right_tensor = right_tensor.to('cuda', dtype=torch.float32)
             with torch.no_grad():   
-                features = model(right_tensor)['res5']
+                right_tensor = (right_tensor - model.pixel_mean) / model.pixel_std
+                features = model.backbone(right_tensor)['res5']
 
             for i in range(features.shape[0]):
                 f = features[i,:,:,:]
