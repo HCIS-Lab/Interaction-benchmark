@@ -240,21 +240,21 @@ class ConvLstm(nn.Module):
         if self.road:
             self.road_enc = nn.Sequential(
                     nn.ReLU(inplace=False),
-                    nn.Conv2d(512, 400, kernel_size=3, stride=1, padding='same'),
-                    nn.BatchNorm2d(400),
+                    nn.Conv2d(512, 256, kernel_size=3, stride=1, padding='same'),
+                    nn.BatchNorm2d(256),
                     nn.ReLU(inplace=False),
-                    nn.Conv2d(400, 256, kernel_size=3, stride=1, padding='same'),
-                    nn.BatchNorm2d(256)
+                    nn.Conv2d(256, 128, kernel_size=3, stride=1, padding='same'),
+                    nn.BatchNorm2d(128)
                         )
 
-            self.road_fc = Road_Head(256)
+            self.road_fc = Road_Head(128)
             self.fusion = nn.Sequential(
-                nn.ReLU(inplace=False),
-                nn.Conv2d(512, 256, kernel_size=1, stride=1, padding='same'),
-                nn.BatchNorm2d(256),
                 nn.ReLU(inplace=False),
                 nn.Conv2d(256, 256, kernel_size=1, stride=1, padding='same'),
                 nn.BatchNorm2d(256),
+                nn.ReLU(inplace=False),
+                nn.Conv2d(256, 128, kernel_size=1, stride=1, padding='same'),
+                nn.BatchNorm2d(128),
                 )
 
 
@@ -272,39 +272,33 @@ class ConvLstm(nn.Module):
             if isinstance(x_i, list):
                 x_i = torch.stack(x_i, dim=0)
                 x_i = torch.permute(x_i, (1,0,2,3,4))
-                x_i = torch.reshape(x_i, (batch_size*self.num_cam, 3, h, w))
-                # x_i = x_i.view(batch_size, self.num_cam, 3, h, w)
-            with torch.no_grad():
-                x_i = (x_i - self.backbone.pixel_mean) / self.backbone.pixel_std
-                x_i = self.backbone.backbone(x_i)['res5']
-                down_h, down_w = x_i.shape[-2], x_i.shape[-1]
-                # x_i = torch.permute(x_i, (1,0,2,3,4))
-                x_i = torch.reshape(x_i, (batch_size, -1, down_h, down_w))
+                x_i = torch.reshape(x_i, (batch_size, 2048*self.num_cam, h, w))
             x_i = self.conv1(x_i)
             x_feature_i = self.conv2(x_i)
-            
-
-            if self.road:
-                x_road_i = self.road_enc(x_i)
-                x_feature_i = torch.cat((x_feature_i, x_road_i), dim=1)
-                x_feature_i = self.fusion(x_feature_i)
-
 
             x_feature_i = torch.unsqueeze(x_feature_i, 1)
 
             if self.road:
-                x_road_i = self.pool(x_road_i)
-                x_road_i = x_road_i.view(batch_size, 256)
+                x_road_i = self.road_enc(x_i)
                 out_road.append(x_road_i)
 
             _, hidden = self.en_lstm(x_feature_i, hidden)
         hidden = hidden[0][0]
+
+        if self.road:
+            out_road = torch.stack(out_road, 0) #[len, batch, 256, h, w]
+            out_road = torch.permute(out_road, (1, 0, 2, 3, 4)) #[batch, len, 256, h, w]
+            out_road_feature = torch.mean(out_road, dim=1) #[batch, 256, h, w]
+            hidden = torch.cat((hidden, out_road_feature), dim=1) #[batch, 512, h, w]
+            hidden = self.fusion(hidden)
         hidden = self.pool(hidden)
         hidden = hidden.view(batch_size, -1)
         ego, actor = self.head(hidden)
+
         if self.road:
-            out_road = torch.stack(out_road, 0)
-            out_road = out_road.view(batch_size*seq_len, 256)
+            out_road = torch.reshape(out_road, (batch_size*seq_len, 128, out_road.shape[-2], out_road.shape[-1]))
+            out_road = self.pool(out_road)
+            out_road = torch.reshape(out_road, (batch_size*seq_len, 128))
             out_road = self.road_fc(out_road)
             return ego, actor, out_road
         else:
