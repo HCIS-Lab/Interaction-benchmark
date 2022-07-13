@@ -1,3 +1,4 @@
+from turtle import back
 import baseline1_model
 import torch
 import torchvision
@@ -11,11 +12,12 @@ import matplotlib.pyplot as plt
 import cv2
 import torch.nn as nn
 import argparse
+import os
 
 # PyTorch TensorBoard support
 # from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-VIDEO_PATH = '../../Anticipating-Accidents/dataset/videos/testing/positive/'
+VIDEO_PATH = '../../Anticipating-Accidents/dataset/videos/'#testing/positive/'
 def get_parser():
     parser = argparse.ArgumentParser(description="Baseline 2")
     parser.add_argument(
@@ -67,17 +69,17 @@ def custom_learning_rate(optimizer, epoch, lr):
         optimizer.param_groups[0]["lr"] = lr/4.0
 
 
-def training(batch_size,n_epoch,learning_rate, dataset):
-    net = baseline1_model.Baseline_Jinkyu().to('cuda')
+def training(batch_size,n_epoch,learning_rate, dataset,early_stop=False):
+    net = baseline1_model.Baseline_Jinkyu(10,20,backbone=False).to('cuda')
     print(net)
-    criterion = baseline1_model.custom_loss(80)
-    optimizer = optim.Adam(net.parameters(), lr=learning_rate)
+    criterion = baseline1_model.custom_loss(80,200)
+    optimizer = optim.SGD(net.parameters(), lr=learning_rate,momentum=0.9,weight_decay = 0.01)
     ###
-    SA_dataset = baseline1_model.SADataset('/mnt/sdb/Dataset/SA_cube')
+    SA_dataset = baseline1_model.SADataset('/mnt/sdb/Dataset/SA_cube', backbone=False)
     dataset_size = len(SA_dataset)
     indices = list(range(dataset_size))
-    split = int(np.floor(0.2 * dataset_size))
-    random_seed = 20
+    split = int(np.floor(0.1 * dataset_size))
+    random_seed = 32
     np.random.seed(random_seed)
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed_all(random_seed)
@@ -110,55 +112,73 @@ def training(batch_size,n_epoch,learning_rate, dataset):
         net.train()
         start_t = time.time()
         running_loss = 0.0
+        att_loss_sum = 0.0
         correct = 0.0
         for i, data in enumerate(trainloader):
             # get the inputs; data is a list of [inputs, labels]
-            inputs,labels,_ = data
+            inputs,labels, file_names = data
             optimizer.zero_grad()
             # zero the parameter gradients
             # forward + backward + optimize
-            pred, _ = net(inputs)
+            pred, _,log_soft = net(inputs)
             labels = labels.long()
-            loss = criterion(pred, labels)
+            loss,att_loss = criterion(pred, labels,log_soft)
             pred = pred.argmax(dim=2)[80,:]
             correct += (pred==labels).sum().float().cpu().numpy()
             loss.backward()
             # print statistics
             running_loss += loss.item()
+            att_loss_sum += att_loss.item()
             # running_loss = 0.0
             optimizer.step()
             print("\tBatch : %d/%d" % (i+1,total_batch),end='\r')
         loss_list.append(running_loss/total_batch)
-        print('\tloss: %f'%(running_loss/total_batch))
+        print('\tloss: %f \t Attention loss: %f'%(running_loss/total_batch,att_loss_sum/total_batch))
         print('\taccuracy: %f%%' % (correct/float(total_batch*batch_size)*100))
         print("Validating...")
         net.eval()
         running_loss = 0.0
+        att_loss_sum = 0.0
         correct = 0.0
         with torch.no_grad():
             for i, data in enumerate(testloader):
                 # get the inputs; data is a list of [inputs, labels]
                 inputs,labels,file_name = data
-                pred, _ = net(inputs)
+                pred, _,log_soft = net(inputs)
                 labels = labels.long()
-                loss = criterion(pred, labels)
+                loss, att_loss = criterion(pred, labels,log_soft)
                 pred = pred.argmax(dim=2)[80,:]
                 correct += (pred==labels).sum().float().cpu().numpy()
                 # print statistics
                 running_loss += loss.item()
+                att_loss_sum += att_loss.item()
                 # running_loss = 0.0
             val_loss_list.append(running_loss/val_total_batch)
-        print('\tloss: %f'%(running_loss/val_total_batch))
+        print('\tloss: %f \t Attention loss: %f'%(running_loss/val_total_batch,att_loss_sum/val_total_batch))
         print('\taccuracy: %f%%' % (correct/float(val_total_batch*batch_size)*100))
         print('\tTime taken: ',time.time()-start_t,' seconds')
         # print("LEARNING RATE: {}".format(my_lr_scheduler.get_last_lr()))
         # my_lr_scheduler.step()
-        if running_loss < best_vloss:
-            best_vloss = running_loss
-            model_path = 'baseline1_' + dataset +'/model_{}'.format(epoch+1)
-            print("Saving model..")
-            torch.save(net.state_dict(), model_path)
+        # if running_loss < best_vloss:
+        #     best_vloss = running_loss
+        #     model_path = 'baseline1_' + dataset +'/model_{}'.format(epoch+1)
+        #     print("Saving model..")
+        #     torch.save(net.state_dict(), model_path)
+    if early_stop:
+        return
     print("Training finish.")
+    with torch.no_grad():
+        for i, data in enumerate(trainloader):
+            inputs,labels, file_names = data
+            preds, probs,_ = net(inputs)
+            preds = nn.functional.softmax(preds,dim=2)
+            for i,label in enumerate(labels):
+                if label:
+                    pred = preds[:,i].cpu().numpy()
+                    weight = probs[:,i].view(-1,10,20).cpu().numpy()
+                    file_name = file_names[i]
+                    print(file_name)
+                    show_result(pred,weight,file_name)
     plt.ylabel('loss')
     plt.xlabel('epoch')
     plt.plot(range(1,n_epoch+1),loss_list, label = 'train')
@@ -166,12 +186,52 @@ def training(batch_size,n_epoch,learning_rate, dataset):
     plt.show()
     return
 
+def show_result(pred, weight, file_name):
+    plt.figure(figsize=(14,5))
+    plt.plot(pred[:90,1],linewidth=3.0)
+    plt.ylim(0, 1)
+    plt.ylabel('Probability')
+    plt.xlabel('Frame')
+    plt.show()
+    cap = cv2.VideoCapture(os.path.join(VIDEO_PATH,file_name)) 
+    ret, frame = cap.read()
+    fig = plt.figure()
+    sub_plot = fig.add_subplot(111)
+    # sub_plot.set_ylim(0,9)
+    frame_list = []
+    while ret:
+        frame = cv2.resize(frame,(640,320),interpolation=cv2.INTER_AREA)
+        frame_list.append(frame) # cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        ret, frame = cap.read()
+    for j in range(100):
+        # ret, frame = cap.read()
+        # frame = cv2.resize(frame,(640,320),interpolation=cv2.INTER_AREA)
+        sub_plot.set_title('{}th frame heatmap.'.format(j+1))
+        im1 = sub_plot.imshow(weight[j], cmap='viridis',interpolation = 'bilinear')
+        if j==0:
+            plt.colorbar(im1)
+        fig.canvas.draw()
+        img = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8,
+                sep='')
+        img  = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        # img is rgb, convert to opencv's default bgr
+        img = cv2.cvtColor(img,cv2.COLOR_RGB2BGR)
+        cv2.imshow("plot",img)
+        # display camera feed
+        cv2.imshow("cam",frame_list[j])
+
+        k = cv2.waitKey(33) & 0xFF
+        if k == 27:
+            break
+    cv2.destroyAllWindows()
+    cap.release()
+
 def demo(batch_size, model_path, dataset):
-    net = baseline1_model.Baseline_Jinkyu().to('cuda')
+    net = baseline1_model.Baseline_Jinkyu(backbone=False).to('cuda')
     net.load_state_dict(torch.load(model_path))
     net.to('cuda')
     net.eval()
-    testset = baseline1_model.SADataset('/mnt/sdb/Dataset/SA_' + dataset,False)
+    testset = baseline1_model.SADataset('/mnt/sdb/Dataset/SA_cube', backbone=False)
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                           shuffle=True, num_workers=0,collate_fn=detection_collate)
     with torch.no_grad():
@@ -184,13 +244,9 @@ def demo(batch_size, model_path, dataset):
                 if label:
                     pred = preds[:,i].cpu().numpy()
                     weight = probs[:,i].view(-1,10,20).cpu().numpy()
-                    plt.figure(figsize=(14,5))
-                    plt.plot(pred[:90,1],linewidth=3.0)
-                    plt.ylim(0, 1)
-                    plt.ylabel('Probability')
-                    plt.xlabel('Frame')
-                    plt.show()
                     file_name = file_names[i]
+                    show_result(pred,weight,file_name)
+                    return
                     # bboxes = det[i]
                     # new_weight = weight*255
                     # counter = 0 
@@ -263,13 +319,19 @@ def precision(batch_size,model_path):
 if __name__ == '__main__':
     args = get_parser()
     args = args.parse_args()
-    learning_rate = 0.0005
+    learning_rate = 0.0001
     batch_size = 10
-    n_epoch = 30
+    n_epoch = 60
     model_path = args.model
     dataset = args.dataset
+    early_stop = True
     if args.mode == "training":
-        training(batch_size, n_epoch, learning_rate, dataset)
+        if early_stop:
+            n_epoch = 20
+            for i in range(1,batch_size+1):
+                training(i, n_epoch, learning_rate, dataset,early_stop=early_stop)
+        else:
+            training(batch_size, n_epoch, learning_rate, dataset)
     elif args.mode == "demo":
         demo(batch_size, model_path, dataset)
     # elif args.mode == "testing":
