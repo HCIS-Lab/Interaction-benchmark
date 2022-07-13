@@ -1,3 +1,4 @@
+from cv2 import normalize
 import torch
 import torch.nn as nn
 from torch.utils.data.dataset import Dataset
@@ -6,6 +7,9 @@ import os
 import numpy as np
 import fnmatch
 import cv2
+import sys
+sys.path.append('../')
+from models.MaskFormer.mask_former.modeling.transformer.position_encoding import PositionEmbeddingSine
 
 __all__ = [
     'Baseline_Jinkyu',
@@ -23,6 +27,7 @@ class SADataset(Dataset):
 #            root = os.path.join(root,"testing")
         
         self.datas_path = []
+        self.datas_path_ = []
         # self.datas_path = []
         self.backbone = backbone
         if self.backbone:
@@ -47,10 +52,17 @@ class SADataset(Dataset):
             paths = ['training','testing']
             # diff_files_list = fnmatch.filter(os.listdir(root), "batch_baseline1*")
             # files_list = list(set(files_list) - set(diff_files_list))
+            sign = None
             for path in paths:
                 files_list = os.listdir(os.path.join(root,path))
+                if path == 'training':
+                    sign = True
+                else:
+                    sign = False
                 for file in files_list:
                     self.datas_path.append(os.path.join(root, path,file))
+                    self.datas_path_.append(sign)
+
         
 
     def __getitem__(self, index):
@@ -75,10 +87,22 @@ class SADataset(Dataset):
             features = torch.stack(features).to('cuda')
         else:
             data = np.load(path)
-            features = data['detectron'][0]
+            # SA_cube: detectron or maskformer or SA: data
+            features = data['maskformer_res5'][0]
+            features = torch.tensor(features).to('cuda')
             labels = data['label']
-            file_name = os.path.join(path,str(data['file_name']))
-        return features,labels,file_name
+            # if labels:
+            #     path = '/mnt/sdb/Dataset/dashcam_dataset/positive'
+            # else:
+            #     path = '/mnt/sdb/Dataset/dashcam_dataset/negative'
+            labels = torch.tensor(labels).to('cuda')
+            if self.datas_path_[index]:
+                # training
+                file_name = os.path.join('training','positive',str(data['file_name']))
+            else:
+                file_name = os.path.join('testing','positive',str(data['file_name']))
+            # file_name = os.path.join(path,str(data['file_name']))
+        return features,labels, file_name#str(data['file_name'])# file_name
 
     def __len__(self):
         # --------------------------------------------
@@ -88,70 +112,94 @@ class SADataset(Dataset):
 
 
 class custom_loss(nn.Module):
-    def __init__(self, time):
+    def __init__(self, time,L,lamb=0):
         # --------------------------------------------
         # Initialization
         # --------------------------------------------
         super(custom_loss, self).__init__()
         self.cel =  nn.CrossEntropyLoss(reduction = 'none')
         self.time = time
+        self.lamb = lamb
+        self.L = L
+        self.before_collision = 0
 
-    def forward(self, outputs, targets):
+    def forward(self, outputs, targets,log_softmax):
         # targets: b (True or false)
         # outputs: txbx2
         # targets = targets.long() # convert to 0 or 1
         # outputs = outputs.permute(1,0,2) #txbx2
-        loss = torch.tensor(0.0).to('cuda')
+        loss_exp = torch.tensor(0.0).to('cuda')
+        loss_soft = torch.tensor(0.0).to('cuda')
+        # b = targets.shape[0]
         for i,pred in enumerate(outputs):
             #bx2
             temp_loss = self.cel(pred,targets) # b
             exp_loss = torch.multiply(torch.exp(torch.tensor(-max(0,self.time-i-1) / 20.0)), temp_loss)
-            # if postive => exp loss
             exp_loss = torch.multiply(exp_loss,targets)
-            loss = torch.add(loss,torch.mean(torch.add(temp_loss,exp_loss)))
-        return loss
+            loss_exp = torch.add(loss_exp, torch.mean(torch.add(temp_loss,exp_loss)))
+        
+        # for i,pred in enumerate(outputs[self.before_collision:]):
+        #     #bx2
+        #     temp_loss = self.cel(pred,targets) # b
+        #     exp_loss = torch.multiply(torch.exp(torch.tensor(-max(0,self.time-(i+self.before_collision)-1) / 20.0)), temp_loss)
+        #     # if postive => exp loss
+        #     exp_loss = torch.multiply(exp_loss,targets)
+        #     loss_exp = torch.add(loss_exp,torch.mean(torch.add(temp_loss,exp_loss)))
+
+        for alpha in log_softmax.permute(2,0,1): # L,t,b: 200,100,10
+            alpha_p = torch.exp(alpha)
+            temp_loss = 1-(alpha_p*alpha).sum(0)
+            loss_soft = torch.add(loss_soft,torch.mean(temp_loss))
+        loss = torch.add(loss_exp,self.lamb*loss_soft/self.L)
+        return loss,self.lamb*loss_soft/self.L
 
 
 
 class Baseline_Jinkyu(nn.Module):
-    def __init__(self, time_steps=100, backbone = True):
+    def __init__(self,h,w, time_steps=100, backbone = True):
         super(Baseline_Jinkyu, self).__init__()
 
         self.hidden_size = 256
         if not backbone:
             self.D = 256 # channel
-        self.D2 = 64 # reduce channel
-        self.height = 10
-        self.width = 20
+        self.D2 = 256 # reduce channel
+        self.height = h
+        self.width = w
         self.L = self.height*self.width
-        self.fusion_size = self.D2*self.L
+        self.fusion_size = 256
         self.time_steps = time_steps
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU(inplace=False)
         self.backbone = None
+        # self.pos_embed = PositionEmbeddingSine(self.D2//2,normalize=True)
         if not backbone:
             self.conv = nn.Sequential(
-                nn.Conv2d(self.D,self.D2, kernel_size=1),
+                # nn.BatchNorm2d(self.D),
+                # nn.Conv2d(self.D,self.D2, kernel_size=1),
+                # nn.BatchNorm2d(self.D),
+                # nn.Linear(self.D,self.D2),
+                nn.Conv2d(self.D, self.D2, kernel_size=3, padding=1 ),
                 nn.BatchNorm2d(self.D2),
-                nn.ReLU(inplace=True),
-                nn.Dropout2d(p=0.3),
+                nn.ReLU(inplace=True), 
+                #nn.ReLU(inplace=False),
+                # nn.Dropout2d(p=0.3),
             )
         else:
             self.backbone = nn.Sequential(
             nn.Conv2d(3, 24, kernel_size=5, stride=2, padding=2 ),
             nn.BatchNorm2d(24),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Conv2d(24, 36, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm2d(36),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Conv2d(36, 48, kernel_size=5, stride=2, padding=2),
             nn.BatchNorm2d(48),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Conv2d(48, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
         )
         self.init_h = nn.Sequential(
             nn.Linear(self.D2,self.hidden_size),
@@ -161,9 +209,8 @@ class Baseline_Jinkyu(nn.Module):
             nn.Linear(self.D2,self.hidden_size),
             nn.Tanh()
         )
-        #InceptionResNetV2(num_classes=1001)
 
-        # self.bn1 = nn.BatchNorm1d(self.D2)
+        self.bn1 = nn.BatchNorm1d(self.D2)
 
         self.project_w = nn.Sequential(
             nn.BatchNorm1d(self.D2),
@@ -172,16 +219,12 @@ class Baseline_Jinkyu(nn.Module):
             # nn.ReLU(inplace=True),
             nn.Dropout(p=0.5),
         )
-        self.w_out = nn.Linear(self.hidden_size, self.D2)
+        self.w_out = nn.Linear(self.hidden_size, 2)
         self.w_h = nn.Linear(self.hidden_size, self.hidden_size)
         self.w_ctx2out = nn.Linear(self.fusion_size, self.hidden_size)
         self.w = nn.Linear(self.hidden_size, self.D2)
-        # self.w = nn.Sequential(
-        #     nn.Linear(self.H, self.D2),
-        #     nn.BatchNorm1d(self.D2),
-        #     nn.ReLU(inplace=True),
-        # )
         self.w_attn = nn.Linear(self.D2, 1)
+        self.attention = nn.MultiheadAttention(self.D2,2)
         self.drop = nn.Dropout(p=0.5)
         self.lstm = nn.LSTMCell(self.fusion_size, self.hidden_size)
 
@@ -215,12 +258,13 @@ class Baseline_Jinkyu(nn.Module):
         return camera_inputs
 
     def decode_lstm(self, h, context):
-        h = self.drop(h)
-        h_logits = self.w_h(h)
-        h_logits += self.w_ctx2out(context)
-        h_logits = self.relu(h_logits)
-        h_logits = self.drop(h_logits)
-        out_logits = self.w_out(h_logits)
+        # h = self.drop(h)
+        # h_logits = self.w_h(h)
+        # h_logits += self.w_ctx2out(context)
+        # h_logits = self.relu(h_logits)
+        # h_logits = self.drop(h_logits)
+        # out_logits = self.w_out(h_logits)
+        out_logits = self.w_out(h)
         return out_logits
 
     def project_feature(self, feature):
@@ -230,52 +274,55 @@ class Baseline_Jinkyu(nn.Module):
 
         return feature_proj
 
-    def attntion_layer(self, features, features_proj, h):
+    def attntion_layer(self, features, h):
         ####################################
         # features: b,1,L,D
         # features_proj: b,1,L,D
         ####################################
-        #print(self.w(h).shape)
-        h_attn = self.relu(features_proj+torch.unsqueeze(self.w(h),1)) # b,L,D
-        out_attn = self.drop(self.w_attn(h_attn.view(-1, self.D2)).view(-1, self.L)) #b,L
-        alpha = nn.functional.softmax(out_attn,dim=1) #b,L
-        # alpha_logp = nn.functional.log_softmax(out_attn,dim=1)
-        context = (features*torch.unsqueeze(alpha,2)).view(-1,self.L*self.D2)# b,D
-
-        return context, alpha #, alpha_logp
+        h_attn = features+torch.unsqueeze(self.w(h),1) # b,L,D
+        # pos = self.pos_embed(h_attn.view(-1,self.D2,self.height,self.width)).contiguous().view(-1,self.L,self.D2)
+        # h_attn += pos
+        # h_attn = h_attn.permute(1,0,2)
+        # out_attn = self.attention(h_attn,h_attn,h_attn)[0].contiguous().permute(1,0,2) # b,L,D
+        
+        alpha = self.w_attn(h_attn).view(-1,self.L) #b,L
+        alpha_logp = nn.functional.log_softmax(alpha,dim=1)
+        alpha = nn.functional.softmax(alpha,dim=1) #b,L
+        context = (h_attn*alpha.unsqueeze(2)).sum(1)#.contiguous().view(-1,self.L*self.D2)# b,LxD
+        return context, alpha, alpha_logp
 
     def forward(self, camera_inputs, device='cuda'):
-        
-        batch_size, t, self.D, h, w = camera_inputs.shape
-        camera_inputs = camera_inputs.view(-1,self.D,h,w)
+        batch_size = camera_inputs.shape[0]
+        # batch_size, t, self.D, h, w = camera_inputs.shape
+        camera_inputs = camera_inputs.view(-1,self.D,self.height,self.width)
         if self.backbone:
             camera_inputs = self.backbone(camera_inputs)
         else:
             camera_inputs = self.conv(camera_inputs)
         # initialize LSTM
-        x0 = camera_inputs.view(batch_size,t,self.L,self.D2)[:,0].sum(dim=1)/self.L
+        x0 = camera_inputs.view(batch_size,self.time_steps,self.L,self.D2)[:,0].sum(dim=1)/self.L
         hx = self.init_h(x0)
         cx = self.init_c(x0)
         collision_stack = []
         attention_stack = []
-        # attention_log_stack = []
+        attention_log_stack = []
 
         # camera_inputs = self.normalization(camera_inputs)
 
-        features_proj = self.project_feature(camera_inputs) #(bxt, L, D)
+        # features_proj = self.project_feature(camera_inputs) #(bxt, L, D)
         
-        camera_inputs = camera_inputs.view(batch_size,t,self.L, self.D2)
-        features_proj = features_proj.view(batch_size,t,self.L, self.D2)
+        camera_inputs = camera_inputs.view(batch_size,self.time_steps,self.L, self.D2)
+        # features_proj = features_proj.view(batch_size,self.time_steps,self.L, self.D2)
         for l in range(self.time_steps):
             features_curr =  camera_inputs[:,l]
-            features_proj_curr = features_proj[:,l]
-            context, alpha = self.attntion_layer(features_curr,features_proj_curr,hx)
+            # features_proj_curr = features_proj[:,l]
+            context, alpha,alpha_logp = self.attntion_layer(features_curr,hx)
             hx, cx = self.lstm(context, (hx, cx))
             pred = self.decode_lstm(hx, context)
             collision_stack.append(pred)
             attention_stack.append(alpha)
-            # attention_log_stack.append(alpha_logp)
+            attention_log_stack.append(alpha_logp)
         collision_stack = torch.stack(collision_stack)
         attention_stack = torch.stack(attention_stack)
-        # attention_log_stack = torch.stack(attention_log_stack)
-        return collision_stack, attention_stack #, attention_log_stack
+        attention_log_stack = torch.stack(attention_log_stack)
+        return collision_stack, attention_stack, attention_log_stack
