@@ -24,13 +24,14 @@ class Feature_Data(Dataset):
                 seg=False,
                 lss=False,
                 num_cam=1,
-                root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'):
+                root='/data/hanku/data_collection'):
         
         self.training = training
         self.is_top = is_top
         self.front_only = front_only
         self.seg = seg
         self.viz = viz
+        self.scale = int(scale)
         self.id = []
         self.variants = []
 
@@ -91,9 +92,14 @@ class Feature_Data(Dataset):
                         
                         # a data sample
 
-                        if not self.is_top and os.path.isdir(v+"/rgb_f/front/"):
-                            check_data = [v+"/rgb_f/front/"+ img for img in os.listdir(v+"/rgb_f/front/") if os.path.isfile(v+"/rgb_f/front/"+ img)]
-                            check_data.sort()
+
+                        if not self.is_top:
+                            if os.path.isdir(v+"/f_r5_"+str(self.scale)+"/front/"):
+                                check_data = [v+"/f_r5_"+str(self.scale)+"/front/"+ img for img in os.listdir(v+"/f_r5_"+str(self.scale)+"/front/") if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/front/"+ img)]
+                                check_data.sort()
+                            else:
+                                continue
+
 
                         if self.is_top and self.seg and os.path.isdir(v+"/semantic_segmentation/lbc_seg/"):
                             check_data = [v+"/semantic_segmentation/lbc_seg/"+ img for img in os.listdir(v+"/semantic_segmentation/lbc_seg/") if os.path.isfile(v+"/semantic_segmentation/lbc_seg/"+ img)]
@@ -128,15 +134,15 @@ class Feature_Data(Dataset):
                                     else:
                                         tops.append(v+"/rgb/top/"+filename)
                                 else:
-                                    if os.path.isfile(v+"/rgb_f/front/"+filename):
-                                        front_temp.append(v+"/rgb_f/front/"+filename)
+                                    if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/front/"+filename):
+                                        front_temp.append(v+"/f_r5_"+str(self.scale)+"/front/"+filename)
                                         if not self.front_only:
-                                            if os.path.isfile(v+"/rgb_f/left/"+filename):
-                                                left_temp.append(v+"/rgb_f/left/"+filename)
+                                            if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/left/"+filename):
+                                                left_temp.append(v+"/f_r5_"+str(self.scale)+"/left/"+filename)
                                             else:
                                                 break
-                                            if os.path.isfile(v+"/rgb_f/right/"+filename):
-                                                right_temp.append(v+"/rgb_f/right/"+filename)
+                                            if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/right/"+filename):
+                                                right_temp.append(v+"/f_r5_"+str(self.scale)+"/right/"+filename)
                                             else:
                                                 break
 
@@ -292,13 +298,7 @@ class Feature_Data(Dataset):
         if self.lss:
             data['post_tran'] = torch.stack(post_tran)
             data['post_rot'] = torch.stack(post_rot)
-        # start_idx = random.choice(data['start_idx']) 
-        # for i in range(start_idx, len(seq_fronts), data['step']):
-        #     data['fronts'].append(torch.from_numpy(np.array(
-        #         scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
-        # for d in data['fronts']:
-        #     print(d.shape)
-        # print(len(data['fronts']))
+
 
         return data
 
@@ -444,16 +444,19 @@ def get_multi_class(gt_list, s_id, v_id):
         road_para = [1,1,0,1,
                     1,0,0,1,1,0,0,
                     ]
+        return
 
     elif road_class == 2:
         road_para = [1,1,1,0,
                     1,1,0,0,0,1,0,
                     ]
+        return
 
     elif road_class == 3:
         road_para = [1,0,1,1,
                     0,0,1,1,0,0,1,
                     ]
+        return
 
     elif road_class == 4:
         road_para = [0,0,0,0,
