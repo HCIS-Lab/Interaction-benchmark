@@ -24,6 +24,7 @@ class Feature_Data(Dataset):
                 seg=False,
                 lss=False,
                 num_cam=1,
+                num_class=36,
                 root='/data/hanku/data_collection'):
         
         self.training = training
@@ -47,6 +48,7 @@ class Feature_Data(Dataset):
         self.num_cam = num_cam
         self.step = []
         self.start_idx = []
+        self.num_class = num_class
 
 
         self.seq_len = seq_len
@@ -86,12 +88,11 @@ class Feature_Data(Dataset):
                             continue
 
                         try:
-                            road_para, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id)
+                            road_para, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id, self.num_class)
                         except:
                             continue
                         
                         # a data sample
-
 
                         if not self.is_top:
                             if os.path.isdir(v+"/f_r5_"+str(self.scale)+"/front/"):
@@ -191,7 +192,7 @@ class Feature_Data(Dataset):
                         self.gt_actor.append(gt_actor)
                         save_actor.append(gt_actor)
 
-        out = [0]*36
+        out = [0]*self.num_class
         out = torch.FloatTensor(out)       
         for a in save_actor:
             out = out + a
@@ -369,7 +370,7 @@ def scale(image, scale=4.0):
     return image
 
 
-def get_multi_class(gt_list, s_id, v_id):   
+def get_multi_class(gt_list, s_id, v_id, num_class):   
     road_type = {'i-': 0, 't1': 1, "t2": 2, "t3": 3, 's-': 4, 'r-': 5}
 
     # ego_table = {'e:z1-z1': 0, 'e:z1-z2': 1, 'e:z1-z3':2, 'e:z1-z4': 3,
@@ -424,6 +425,19 @@ def get_multi_class(gt_list, s_id, v_id):
                     'cl-c1': 32, 'cl-c2': 33,
                     'cr-c3': 34, 'cr-c4': 35}
 
+    # # intersection only
+    # actor_table = {'z1-z1': 0, 'z1-z2': 1, 'z1-z3':2, 'z1-z4':3,
+    #                 'z2-z1': 4, 'z2-z2':5, 'z2-z3': 6, 'z2-z4': 7,
+    #                 'z3-z1': 8, 'z3-z2': 9, 'z3-z3': 10, 'z3-z4': 11,
+    #                 'z4-z1': 12, 'z4-z2': 13, 'z4-z3': 14, 'z4-z4': 15,
+
+    #                 'c1-c2': 16, 'c1-c4': 17, 
+    #                 'c2-c1': 18, 'c2-c3': 19, 
+    #                 'c3-c2': 20, 'c3-c4': 21, 
+    #                 'c4-c1': 22, 'c4-c3': 23 
+                    
+    #                 }
+
 
 
     road_class = s_id.split('_')[1][:2]
@@ -444,19 +458,19 @@ def get_multi_class(gt_list, s_id, v_id):
         road_para = [1,1,0,1,
                     1,0,0,1,1,0,0,
                     ]
-        return
+        # return
 
     elif road_class == 2:
         road_para = [1,1,1,0,
                     1,1,0,0,0,1,0,
                     ]
-        return
+        # return
 
     elif road_class == 3:
         road_para = [1,0,1,1,
                     0,0,1,1,0,0,1,
                     ]
-        return
+        # return
 
     elif road_class == 4:
         road_para = [0,0,0,0,
@@ -474,7 +488,9 @@ def get_multi_class(gt_list, s_id, v_id):
     road_para = torch.FloatTensor(road_para)
 
     ego_class = None
-    actor_class = [0]*36
+
+    actor_class = [0]*num_class
+
     for gt in gt_list:
         gt = gt.lower()
         if gt[0] == 'e':
