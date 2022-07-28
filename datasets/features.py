@@ -68,8 +68,8 @@ torch.cuda.empty_cache()
 scale=4
 # root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'
 # save_root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'
-root='/data/hanku/data_collection'
-save_root='/data/hanku/data_collection'
+root='/data/carla_dataset/data_collection'
+save_root='/data/carla_feature/data_collection'
 
 
 # save = '/media/hankung/07FEBA3A204BD225/r4_4'
@@ -86,11 +86,15 @@ model.eval()
 for t, type in enumerate(type_list):
     basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
     save = os.path.join(save_root, type)
+    if not os.path.isdir(save):
+        os.mkdir(save)
     # iterate scenarios
     print('searching data')
     for s in tqdm(basic_scenarios, file=sys.stdout):
         # a basic scenario
         scenario_id = s.split('/')[-1]
+        if not os.path.isdir(os.path.join(save, scenario_id)):
+            os.mkdir(os.path.join(save, scenario_id))
         save_scen = os.path.join(save, scenario_id, 'variant_scenario')
         if not os.path.isdir(save_scen):
             os.mkdir(save_scen)
@@ -115,26 +119,26 @@ for t, type in enumerate(type_list):
             # f_path = v+"/rgb_f/" + '_'+str(int(scale))
             # if not os.path.isdir(f_path):
             #     os.mkdir(f_path)
-            if not os.path.isdir(save_v + "/f_r4_"+str(scale)):
-                os.mkdir(save_v + "/f_r4_"+str(scale))
+            if not os.path.isdir(save_v + "/r5_"+str(scale)):
+                os.mkdir(save_v + "/r5_"+str(scale))
 
             if os.path.isdir(v+"/rgb/front/"):
                 fronts = [v+"/rgb/front/"+ img for img in os.listdir(v+"/rgb/front/") if os.path.isfile(v+"/rgb/front/"+ img)]
-                if not os.path.isdir(save_v + "/f_r4_"+str(scale)+"/front/"):
-                    os.mkdir(save_v + "/f_r4_"+str(scale)+"/front/")
-                n_fronts = [save_v + "/f_r4_"+str(scale)+"/front/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
+                if not os.path.isdir(save_v + "/r5_"+str(scale)+"/front/"):
+                    os.mkdir(save_v + "/r5_"+str(scale)+"/front/")
+                n_fronts = [save_v + "/r5_"+str(scale)+"/front/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
             # ---------------------
             if os.path.isdir(v+"/rgb/right/"):
                 rights = [v+"/rgb/right/"+ img for img in os.listdir(v+"/rgb/right/") if os.path.isfile(v+"/rgb/right/"+ img)]
-                if not os.path.isdir(save_v + "/f_r4_"+str(scale)+"/right/"):
-                    os.mkdir(save_v + "/f_r4_"+str(scale)+"/right/")
-                n_rights = [save_v +"/f_r4_"+str(scale)+"/right/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/right/")]
+                if not os.path.isdir(save_v + "/r5_"+str(scale)+"/right/"):
+                    os.mkdir(save_v + "/r5_"+str(scale)+"/right/")
+                n_rights = [save_v +"/r5_"+str(scale)+"/right/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/right/")]
             # -----------------------
             if os.path.isdir(v+"/rgb/left/"):
                 lefts = [v+"/rgb/left/"+ img for img in os.listdir(v+"/rgb/left/") if os.path.isfile(v+"/rgb/left/"+ img)]
-                if not os.path.isdir(save_v + "/f_r4_"+str(scale)+"/left/"):
-                    os.mkdir(save_v + "/f_r4_"+str(scale)+"/left/")
-                n_lefts = [save_v +"/f_r4_"+str(scale)+"/left/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/left/")]
+                if not os.path.isdir(save_v + "/r5_"+str(scale)+"/left/"):
+                    os.mkdir(save_v + "/r5_"+str(scale)+"/left/")
+                n_lefts = [save_v +"/r5_"+str(scale)+"/left/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/left/")]
 
 
             scale = float(scale)
@@ -182,7 +186,7 @@ for t, type in enumerate(type_list):
                 for i, t in enumerate(front_tensor_ls):
                     t = t.to('cuda', dtype=torch.float32)
                     t = (t - model.pixel_mean) / model.pixel_std
-                    front_tensor_ls[i] = model.backbone(t)['res4'].cpu()
+                    front_tensor_ls[i] = model.backbone(t)['res5'].cpu()
                 f_features = torch.cat((front_tensor_ls[0],front_tensor_ls[1],front_tensor_ls[2],front_tensor_ls[3]), dim=0)
                 # f_features = torch.stack(front_tensor_ls)
             t_f = threading.Thread(target=save_feature, args=(f_features, n_fronts))
@@ -193,7 +197,7 @@ for t, type in enumerate(type_list):
                 for i, t in enumerate(right_tensor_ls):
                     t = t.to('cuda', dtype=torch.float32)
                     t = (t - model.pixel_mean) / model.pixel_std
-                    right_tensor_ls[i] = model.backbone(t)['res4'].cpu()
+                    right_tensor_ls[i] = model.backbone(t)['res5'].cpu()
                 r_features = torch.cat((right_tensor_ls[0],right_tensor_ls[1],right_tensor_ls[2],right_tensor_ls[3]), dim=0)
                 # r_features = torch.stack(right_tensor_ls)
             t_r = threading.Thread(target=save_feature, args=(r_features, n_rights))
@@ -203,7 +207,7 @@ for t, type in enumerate(type_list):
                 for i, t in enumerate(left_tensor_ls):
                     t = t.to('cuda', dtype=torch.float32)
                     t = (t - model.pixel_mean) / model.pixel_std
-                    left_tensor_ls[i] = model.backbone(t)['res4'].cpu()
+                    left_tensor_ls[i] = model.backbone(t)['res5'].cpu()
                 l_features = torch.cat((left_tensor_ls[0],left_tensor_ls[1],left_tensor_ls[2],left_tensor_ls[3]), dim=0)
                 # l_features = torch.stack(left_tensor_ls)
             t_l = threading.Thread(target=save_feature, args=(l_features, n_lefts))

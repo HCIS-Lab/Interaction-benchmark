@@ -5,24 +5,25 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import torch.nn.functional as F
 from MaskFormer.demo.demo import get_maskformer
 from retrieval_head import Head, Road_Head
+from convlstm import ConvLSTM
 
 
-class CNNLSTM_maskformer(nn.Module):
+class Cat_CNNLSTM_maskformer(nn.Module):
     def __init__(self, num_cam, num_ego_class, num_actor_class, road):
-        super(CNNLSTM_maskformer, self).__init__()
+        super(Cat_CNNLSTM_maskformer, self).__init__()
         self.num_cam = num_cam
         self.road = road
         # self.backbone = get_maskformer()
 
         self.conv1 = nn.Sequential(
                 nn.ReLU(inplace=False),
-                nn.Conv2d(2048*self.num_cam, 1024*self.num_cam, kernel_size=1, stride=1, padding='same'),
-                nn.BatchNorm2d(1024*self.num_cam),
-                nn.ReLU(inplace=False),
-                nn.Conv2d(1024*self.num_cam, 1024, kernel_size=1, stride=1, padding='same'),
+                nn.Conv2d(2048, 1024, kernel_size=3, stride=1, padding='same'),
                 nn.BatchNorm2d(1024),
                 nn.ReLU(inplace=False),
-                nn.Conv2d(1024, 512, kernel_size=1, stride=1, padding='same'),
+                nn.Conv2d(1024, 1024, kernel_size=3, stride=1, padding='same'),
+                nn.BatchNorm2d(1024),
+                nn.ReLU(inplace=False),
+                nn.Conv2d(1024, 512, kernel_size=3, stride=1, padding='same'),
                 nn.BatchNorm2d(512)
                     )
 
@@ -72,7 +73,6 @@ class CNNLSTM_maskformer(nn.Module):
 
 
     def train_forward(self, x):
-
         hidden, hidden_road = None, None
         seq_len = len(x)//self.num_cam
 
@@ -83,10 +83,11 @@ class CNNLSTM_maskformer(nn.Module):
         for i in range(seq_len):
             x_i = x[i*self.num_cam : i*self.num_cam + self.num_cam]
             if isinstance(x_i, list):
-                x_i = torch.stack(x_i, dim=0) #[v, b, 2048, h, w]
-                x_i = torch.permute(x_i, (1,0,2,3,4)) #[b, v, 2048, h, w]
-                x_i = torch.reshape(x_i, (batch_size, 2048*self.num_cam, h, w)) #[b, 2048*3, h, w]
-
+                x_i = torch.cat((x_i[1],x_i[0], x_i[2]), dim=3) #[v, b, 2048, h, w]
+                # x_i = torch.permute(x_i, (1,2,3,4,0)) #[b, v, 2048, h, w]
+                # x_i = torch.cat()
+                # x_i = torch.reshape(x_i, (batch_size, 2048, h, w*self.num_cam)) #[b, 2048*3, h, w]
+                
             x_i = self.conv1(x_i)
             x_feature_i = self.conv2(x_i)
             
