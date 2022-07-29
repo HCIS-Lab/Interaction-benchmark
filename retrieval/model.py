@@ -8,8 +8,9 @@ sys.path.append('/home/hankung/Desktop/Interaction_benchmark/models')
 # from models import *
 import cnnlstm_image
 import slowfast
-import arg
+# import arg
 import cnnlstm_backbone
+import cat_cnnlstm
 import cnnpool
 import fpnlstm
 import convlstm
@@ -22,6 +23,8 @@ def generate_model(model_name, num_cam, num_ego_class, num_actor_class, seq_len,
 		model = cnnlstm_image.CNNLSTM(num_cam, num_ego_class, num_actor_class)
 	elif model_name == 'cnnlstm_maskformer':
 		model = cnnlstm_backbone.CNNLSTM_maskformer(num_cam, num_ego_class, num_actor_class, road)
+	elif model_name == 'cat_cnnlstm':
+		model = cat_cnnlstm.Cat_CNNLSTM_maskformer(num_cam, num_ego_class, num_actor_class, road)
 	elif model_name == 'convlstm':
 		model = convlstm.ConvLstm(num_cam, num_ego_class, num_actor_class, road)
 	elif model_name == 'fpnlstm':
@@ -32,8 +35,8 @@ def generate_model(model_name, num_cam, num_ego_class, num_actor_class, seq_len,
 		model = slowfast.resnet50(num_ego_class, num_actor_class)
 	elif model_name == 'i3d':
 		model = i3d.I3D(num_classes=opt.n_classes)
-	elif model_name == 'arg':
-		model = arg.ARG(num_cam, num_ego_class, num_actor_class, seq_len)
+	# elif model_name == 'arg':
+	# 	model = arg.ARG(num_cam, num_ego_class, num_actor_class, seq_len)
 	elif model_name == 'orn':
 		model = cnnlstm.CNNLSTM(num_classes=opt.n_classes)
 	elif model_name == 'arg':

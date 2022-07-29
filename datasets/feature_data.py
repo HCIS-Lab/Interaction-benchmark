@@ -24,13 +24,15 @@ class Feature_Data(Dataset):
                 seg=False,
                 lss=False,
                 num_cam=1,
-                root='/media/hankung/ssd/carla_13/CARLA_0.9.13/PythonAPI/examples/data_collection'):
+                num_class=36,
+                root='/data/hanku/data_collection'):
         
         self.training = training
         self.is_top = is_top
         self.front_only = front_only
         self.seg = seg
         self.viz = viz
+        self.scale = int(scale)
         self.id = []
         self.variants = []
 
@@ -46,6 +48,7 @@ class Feature_Data(Dataset):
         self.num_cam = num_cam
         self.step = []
         self.start_idx = []
+        self.num_class = num_class
 
 
         self.seq_len = seq_len
@@ -85,15 +88,19 @@ class Feature_Data(Dataset):
                             continue
 
                         try:
-                            road_para, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id)
+                            road_para, gt_ego, gt_actor = get_multi_class(gt, scenario_id, v_id, self.num_class)
                         except:
                             continue
                         
                         # a data sample
 
-                        if not self.is_top and os.path.isdir(v+"/rgb_f/front/"):
-                            check_data = [v+"/rgb_f/front/"+ img for img in os.listdir(v+"/rgb_f/front/") if os.path.isfile(v+"/rgb_f/front/"+ img)]
-                            check_data.sort()
+                        if not self.is_top:
+                            if os.path.isdir(v+"/f_r5_"+str(self.scale)+"/front/"):
+                                check_data = [v+"/f_r5_"+str(self.scale)+"/front/"+ img for img in os.listdir(v+"/f_r5_"+str(self.scale)+"/front/") if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/front/"+ img)]
+                                check_data.sort()
+                            else:
+                                continue
+
 
                         if self.is_top and self.seg and os.path.isdir(v+"/semantic_segmentation/lbc_seg/"):
                             check_data = [v+"/semantic_segmentation/lbc_seg/"+ img for img in os.listdir(v+"/semantic_segmentation/lbc_seg/") if os.path.isfile(v+"/semantic_segmentation/lbc_seg/"+ img)]
@@ -128,15 +135,15 @@ class Feature_Data(Dataset):
                                     else:
                                         tops.append(v+"/rgb/top/"+filename)
                                 else:
-                                    if os.path.isfile(v+"/rgb_f/front/"+filename):
-                                        front_temp.append(v+"/rgb_f/front/"+filename)
+                                    if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/front/"+filename):
+                                        front_temp.append(v+"/f_r5_"+str(self.scale)+"/front/"+filename)
                                         if not self.front_only:
-                                            if os.path.isfile(v+"/rgb_f/left/"+filename):
-                                                left_temp.append(v+"/rgb_f/left/"+filename)
+                                            if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/left/"+filename):
+                                                left_temp.append(v+"/f_r5_"+str(self.scale)+"/left/"+filename)
                                             else:
                                                 break
-                                            if os.path.isfile(v+"/rgb_f/right/"+filename):
-                                                right_temp.append(v+"/rgb_f/right/"+filename)
+                                            if os.path.isfile(v+"/f_r5_"+str(self.scale)+"/right/"+filename):
+                                                right_temp.append(v+"/f_r5_"+str(self.scale)+"/right/"+filename)
                                             else:
                                                 break
 
@@ -185,7 +192,7 @@ class Feature_Data(Dataset):
                         self.gt_actor.append(gt_actor)
                         save_actor.append(gt_actor)
 
-        out = [0]*36
+        out = [0]*self.num_class
         out = torch.FloatTensor(out)       
         for a in save_actor:
             out = out + a
@@ -292,13 +299,7 @@ class Feature_Data(Dataset):
         if self.lss:
             data['post_tran'] = torch.stack(post_tran)
             data['post_rot'] = torch.stack(post_rot)
-        # start_idx = random.choice(data['start_idx']) 
-        # for i in range(start_idx, len(seq_fronts), data['step']):
-        #     data['fronts'].append(torch.from_numpy(np.array(
-        #         scale_and_crop_image(Image.open(seq_fronts[i]).convert('RGB')))))
-        # for d in data['fronts']:
-        #     print(d.shape)
-        # print(len(data['fronts']))
+
 
         return data
 
@@ -369,7 +370,7 @@ def scale(image, scale=4.0):
     return image
 
 
-def get_multi_class(gt_list, s_id, v_id):   
+def get_multi_class(gt_list, s_id, v_id, num_class):   
     road_type = {'i-': 0, 't1': 1, "t2": 2, "t3": 3, 's-': 4, 'r-': 5}
 
     # ego_table = {'e:z1-z1': 0, 'e:z1-z2': 1, 'e:z1-z3':2, 'e:z1-z4': 3,
@@ -424,6 +425,19 @@ def get_multi_class(gt_list, s_id, v_id):
                     'cl-c1': 32, 'cl-c2': 33,
                     'cr-c3': 34, 'cr-c4': 35}
 
+    # # intersection only
+    # actor_table = {'z1-z1': 0, 'z1-z2': 1, 'z1-z3':2, 'z1-z4':3,
+    #                 'z2-z1': 4, 'z2-z2':5, 'z2-z3': 6, 'z2-z4': 7,
+    #                 'z3-z1': 8, 'z3-z2': 9, 'z3-z3': 10, 'z3-z4': 11,
+    #                 'z4-z1': 12, 'z4-z2': 13, 'z4-z3': 14, 'z4-z4': 15,
+
+    #                 'c1-c2': 16, 'c1-c4': 17, 
+    #                 'c2-c1': 18, 'c2-c3': 19, 
+    #                 'c3-c2': 20, 'c3-c4': 21, 
+    #                 'c4-c1': 22, 'c4-c3': 23 
+                    
+    #                 }
+
 
 
     road_class = s_id.split('_')[1][:2]
@@ -444,16 +458,19 @@ def get_multi_class(gt_list, s_id, v_id):
         road_para = [1,1,0,1,
                     1,0,0,1,1,0,0,
                     ]
+        # return
 
     elif road_class == 2:
         road_para = [1,1,1,0,
                     1,1,0,0,0,1,0,
                     ]
+        # return
 
     elif road_class == 3:
         road_para = [1,0,1,1,
                     0,0,1,1,0,0,1,
                     ]
+        # return
 
     elif road_class == 4:
         road_para = [0,0,0,0,
@@ -471,7 +488,9 @@ def get_multi_class(gt_list, s_id, v_id):
     road_para = torch.FloatTensor(road_para)
 
     ego_class = None
-    actor_class = [0]*36
+
+    actor_class = [0]*num_class
+
     for gt in gt_list:
         gt = gt.lower()
         if gt[0] == 'e':

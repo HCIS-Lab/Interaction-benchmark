@@ -12,7 +12,7 @@ class Head(nn.Module):
 
 		self.fc_actor = nn.Sequential(
                 nn.ReLU(inplace=False),
-                nn.Linear(in_channel, 36)
+                nn.Linear(in_channel, num_actor_classes)
                 )
 
 	def forward(self, x):
