@@ -14,9 +14,10 @@ import torch.nn as nn
 torch.backends.cudnn.benchmark = True
 
 import sys
-sys.path.append('/home/hankung/Desktop/Interaction_benchmark/datasets')
-sys.path.append('/home/hankung/Desktop/Interaction_benchmark/config')
-sys.path.append('/home/hankung/Desktop/Interaction_benchmark/models')
+# sys.path.append('/data/hanku/Interaction_benchmark/datasets')
+sys.path.append('/data/hanku/Interaction-benchmark/datasets')
+sys.path.append('/data/hanku/Interaction-benchmark/config')
+sys.path.append('/data/hanku/Interaction-benchmark/models')
 
 # from .configs.config import GlobalConfig
 import feature_data
@@ -115,19 +116,19 @@ class Engine(object):
 			if self.top:
 				tops_in = data['tops']
 
-			fronts = []
-			lefts = []
-			rights = []
-			tops = []
-
+			# fronts = []
+			# lefts = []
+			# rights = []
+			# tops = []
+			inputs = []
 			for i in range(seq_len):
 				if self.top:
 					tops.append(tops_in[i].to(args.device, dtype=torch.float32))
 				else:
-					fronts.append(fronts_in[i].to(args.device, dtype=torch.float32))
+					inputs.append(fronts_in[i].to(args.device, dtype=torch.float32))
 					if not self.front_only:
-						lefts.append(lefts_in[i].to(args.device, dtype=torch.float32))
-						rights.append(rights_in[i].to(args.device, dtype=torch.float32))
+						inputs.append(lefts_in[i].to(args.device, dtype=torch.float32))
+						inputs.append(rights_in[i].to(args.device, dtype=torch.float32))
 
 			# labels
 			road = torch.FloatTensor(data['road_para']).to(args.device)
@@ -137,9 +138,10 @@ class Engine(object):
 			actor = torch.FloatTensor(data['actor']).to(args.device)
 
 			if self.road_topo:
-				pred_ego, pred_actor, pred_road_para = model.train_forward(fronts+lefts+rights+tops)
+				pred_ego, pred_actor, pred_road_para = model.train_forward(inputs)
 			else:
-				pred_ego, pred_actor = model.train_forward(fronts+lefts+rights+tops)
+				pred_ego, pred_actor = model.train_forward(inputs)
+
 
 			pos_weight = torch.ones([num_actor_class])*args.weight
 			ce = nn.CrossEntropyLoss(reduction='mean').cuda()
@@ -147,19 +149,19 @@ class Engine(object):
 			road_bce = nn.BCEWithLogitsLoss(reduction='mean').cuda()
 
 			# print(pred_actor[0].data)
-			ce_loss = ce(pred_ego, ego)
+			# ce_loss = ce(pred_ego, ego)
 			bce_loss = bce(pred_actor, actor)
 
 			if self.road_topo:
 				road_loss = (road_bce(pred_road_para, road))
 			else:
 				road_loss = 0.
-
-			loss = ce_loss + self.bce_weight * bce_loss + road_loss
+			loss = self.bce_weight * bce_loss + road_loss
+			# loss = ce_loss + self.bce_weight * bce_loss + road_loss
 			loss.backward()
 
 			loss_epoch += float(loss.item())
-			ce_loss_epoch += float(ce_loss.item())
+			# ce_loss_epoch += float(ce_loss.item())
 			bce_loss_epoch += float(bce_loss.item())
 			if self.road_topo:
 				road_loss_epoch += float(road_loss.item())
@@ -170,16 +172,18 @@ class Engine(object):
 			optimizer.zero_grad()
 			writer.add_scalar('train_loss', loss.item(), self.cur_iter)
 			self.cur_iter += 1
-		
-		
+
 		loss_epoch = loss_epoch / num_batches
-		ce_loss_epoch = ce_loss_epoch / num_batches
+		# ce_loss_epoch = ce_loss_epoch / num_batches
 		bce_loss_epoch = bce_loss_epoch / num_batches
 		road_loss_epoch = road_loss_epoch / num_batches
+
+
+
 		print('total loss')
 		print(loss_epoch)
-		print('ce loss:')
-		print(ce_loss_epoch)
+		# print('ce loss:')
+		# print(ce_loss_epoch)
 		print('bce loss:')
 		print(bce_loss_epoch)
 
@@ -190,7 +194,7 @@ class Engine(object):
 		self.train_loss.append(loss_epoch)
 		self.cur_epoch += 1
 
-	def validate(self, cam=False):
+	def validate(self, dataloader, cam=False):
 		model.eval()
 		with torch.no_grad():	
 			num_batches = 0
@@ -208,7 +212,7 @@ class Engine(object):
 			pred_road_para_list = []
 
 			# Validation loop
-			for batch_num, data in enumerate(tqdm(dataloader_val), 0):
+			for batch_num, data in enumerate(tqdm(dataloader), 0):
 				
 				id = data['id']
 				v = data['variants']
@@ -219,19 +223,20 @@ class Engine(object):
 				if self.top:
 					tops_in = data['tops']
 
-				fronts = []
-				lefts = []
-				rights = []
-				tops = []
+				# fronts = []
+				# lefts = []
+				# rights = []
+				# tops = []
+				inputs = []
 
 				for i in range(seq_len):
 					if self.top:
-						tops.append(tops_in[i].to(args.device, dtype=torch.float32))
+						inputs.append(tops_in[i].to(args.device, dtype=torch.float32))
 					else:
-						fronts.append(fronts_in[i].to(args.device, dtype=torch.float32))
+						inputs.append(fronts_in[i].to(args.device, dtype=torch.float32))
 						if not self.front_only:
-							lefts.append(lefts_in[i].to(args.device, dtype=torch.float32))
-							rights.append(rights_in[i].to(args.device, dtype=torch.float32))
+							inputs.append(lefts_in[i].to(args.device, dtype=torch.float32))
+							inputs.append(rights_in[i].to(args.device, dtype=torch.float32))
 
 				road = torch.FloatTensor(data['road_para']).to(args.device)
 				batch_size = road.shape[0]
@@ -240,31 +245,55 @@ class Engine(object):
 				actor = torch.FloatTensor(data['actor']).to(args.device)
 
 				if self.road_topo:
-					pred_ego, pred_actor, pred_road_para = model.train_forward(fronts+lefts+rights+tops)
+					pred_ego, pred_actor, pred_road_para = model.train_forward(inputs)
 				else:
-					pred_ego, pred_actor = model.train_forward(fronts+lefts+rights+tops)
+					pred_ego, pred_actor = model.train_forward(inputs)
 
 
-				ce = nn.CrossEntropyLoss(reduction='mean').cuda()
+				# ce = nn.CrossEntropyLoss(reduction='mean').cuda()
 				pos_weight = torch.ones([num_actor_class])*args.weight
 				bce = nn.BCEWithLogitsLoss(reduction='mean', pos_weight=pos_weight).cuda()
 				road_bce = nn.BCEWithLogitsLoss(reduction='mean').cuda()
 
-				ego_loss = ce(pred_ego, ego)
+				# ego_loss = ce(pred_ego, ego)
 				actor_loss = bce(pred_actor, actor)
 				if self.road_topo:
 					road_loss = (road_bce(pred_road_para, road))
 				else:
 					road_loss = 0.
-				loss = ego_loss + self.bce_weight * actor_loss + road_loss
+
+				loss = self.bce_weight * actor_loss + road_loss
+				# loss = ego_loss + self.bce_weight * actor_loss + road_loss
 
 				num_batches += 1
 
-				_, pred_ego = torch.max(pred_ego.data, 1)
+				# _, pred_ego = torch.max(pred_ego.data, 1)
 				pred_actor = torch.sigmoid(pred_actor)
 				pred_actor = pred_actor > 0.5
 				pred_actor = pred_actor.float()
 
+
+# ---------
+				# print_label = actor.int()
+				# print_pred = pred_actor.int()
+				# print_label = print_label.view(-1)
+				# print_pred = print_pred.view(-1)
+				# # print(print_label.data == print_pred.data)
+				# if 1 in print_label[8:] or 1 in print_label[18] or 1 in print_label[19] or 1 in print_label[22] or 1 in print_label[25]:   
+
+				# 	p_l = []
+				# 	pp_l=[]
+				# 	for p_i in range(print_label.shape[0]):
+				# 	    if print_label[p_i] == 1:
+				# 	        p_l.append(p_i)
+				# 	for p_i in range(print_pred.shape[0]):
+				# 	    if print_pred[p_i] == 1:
+				# 	        pp_l.append(p_i)
+				# 	print('gt')
+				# 	print(p_l)
+				# 	print('pred')
+				# 	print(pp_l)
+					# ---
 				if self.road_topo:
 					pred_road_para = torch.sigmoid(pred_road_para)
 					pred_road_para = pred_road_para > 0.5
@@ -284,9 +313,8 @@ class Engine(object):
 				# 	average='macro',
 				# 	zero_division=0)
 
-				total_ego += ego.size(0)
-
-				correct_ego += (pred_ego == ego).sum().item()
+				# total_ego += ego.size(0)
+				# correct_ego += (pred_ego == ego).sum().item()
 
 			pred_actor_list = np.squeeze(np.stack(pred_actor_list, axis=0), axis=1)
 			label_actor_list = np.squeeze(np.stack(label_actor_list, axis=0), axis=1)
@@ -342,15 +370,15 @@ class Engine(object):
 
 			acc = accuracy_score(label_actor_list, pred_actor_list)
 			hamming = hamming_loss(label_actor_list, pred_actor_list)
-			print('----------------------Ego--------------------------------')
-			print(f'Accuracy of the ego: {100 * correct_ego // total_ego} %')
-			print('----------------------actor--------------------------------')
-			print(f'Accuracy of the actor: {acc}')
-			print(f'hamming of the actor: {hamming}')
+			# print('----------------------Ego--------------------------------')
+			# print(f'Accuracy of the ego: {100 * correct_ego // total_ego} %')
+			# print('----------------------actor--------------------------------')
+#print(f'Accuracy of the actor: {acc}')
+#			print(f'hamming of the actor: {hamming}')
 
 
-			print(f'precision of the actor: {precision}')
-			print(f'recall of the actor: {recall}')
+#			print(f'precision of the actor: {precision}')
+#			print(f'recall of the actor: {recall}')
 			print(f'f1 of the actor: {mean_f1}')
 
 			mean_f1 = f1_score(
@@ -365,10 +393,10 @@ class Engine(object):
 			if self.road_topo:
 				acc = accuracy_score(label_road_para_list, pred_road_para_list)
 				hamming = hamming_loss(label_road_para_list, pred_road_para_list)
-				print(f'Accuracy of the road: {acc}')
-				print(f'hamming of the road: {hamming}')
-				print(f'precision of the road: {r_precision}')
-				print(f'recall of the road: {r_recall}')
+#				print(f'Accuracy of the road: {acc}')
+#				print(f'hamming of the road: {hamming}')
+#				print(f'precision of the road: {r_precision}')
+#				print(f'recall of the road: {r_recall}')
 				print(f'f1 of the road: {r_mean_f1}')
 
 				r_mean_f1 = f1_score(
@@ -513,9 +541,9 @@ else:
 train_set = feature_data.Feature_Data(seq_len=seq_len, is_top=is_top, front_only=front_only, scale=args.scale, seg=args.seg, lss=args.lss, num_cam=num_cam)
 val_set = feature_data.Feature_Data(seq_len=seq_len, training=False, is_top=is_top, front_only=front_only, scale=args.scale, viz=args.viz, seg=args.seg, lss=args.lss, num_cam=num_cam)
 # print(val_set)
-dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
-
+dataloader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=32, pin_memory=True)
+dataloader_val = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=32, pin_memory=True)
+# dataloader_val_train = DataLoader(train_set, batch_size=1, shuffle=False, num_workers=8, pin_memory=True)
 # Model
 model = generate_model(args.id, num_cam, num_ego_class, num_actor_class, args.seq_len, args.road).cuda()
 
@@ -561,8 +589,9 @@ with open(os.path.join(args.logdir, 'args.txt'), 'w') as f:
 if not args.test:
 	for epoch in range(trainer.cur_epoch, args.epochs): 
 		trainer.train()
-		if epoch % args.val_every == 0: 
-				trainer.validate(None)
+		if epoch % args.val_every == 0 or epoch == args.epochs-1: 
+				trainer.validate(dataloader_val, None)
+				# trainer.validate(dataloader_val_train, None)
 				trainer.save()
 		if args.viz and epoch % 20 == 0:
 				trainer.vizualize(cam)
