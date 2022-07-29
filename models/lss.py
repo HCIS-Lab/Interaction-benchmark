@@ -8,8 +8,9 @@ import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
 from torchvision.models.resnet import resnet18
-
-from .tools import gen_dx_bx, cumsum_trick, QuickCumsum
+from pyquaternion import Quaternion
+from tool import gen_dx_bx, cumsum_trick, QuickCumsum, get_rot
+import numpy as np
 
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
@@ -176,16 +177,62 @@ class LSS(nn.Module):
                         torch.Tensor([[float(5), float(0), float(w)], 
                                        [float(0), float(5), float(h)], 
                                        [float(0), float(0), float(1)]])]
-        self.trans = [torch.Tensor([float(2.71671180725), float(0), float(0)]),
-                torch.Tensor([float(2.71671180725), float(0), float(0)]),
-                torch.Tensor([float(2.71671180725), float(0), float(0)])]
-        self.rots = [torch.Tensor(Quaternion([float(0.5), float(-0.5), float(0.5), float(-0.5)]).rotation_matrix),
-                    torch.Tensor(Quaternion([float(0.67), float(-0.67), float(0.21), float(-0.21)]).rotation_matrix),
-                    torch.Tensor(Quaternion([float(0.21), float(-0.21), float(0.67), float(-0.67)]).rotation_matrix),
-                    ]
-        self.intrins = torch.stack(self.intrins)
-        self.trans = torch.stack(self.intrins)
-        self.rots = torch.stack(self.intrins)
+        intrins = self.intrins
+
+        self.intrins = torch.stack(intrins).to('cuda')
+        tmp = [intrins[0]]
+        self.trans = torch.stack(tmp).to('cuda')
+        tmp = []
+        for a in range(3):
+            rot = torch.Tensor(Quaternion([float(w), float(5), float(0), float(w)]).rotation_matrix)
+            tmp.append(rot)
+        self.rots = torch.stack(tmp).to('cuda')
+        post_trans = []
+        post_rots = []
+        for i in range(3):
+            post_tran = torch.zeros(2)
+            post_rot = torch.eye(2)
+            resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
+            post_tran2, post_rot2 = self.lss_transform(post_tran, post_rot, resize, resize_dims, crop, flip, rotate)
+            post_tran = torch.zeros(3)
+            post_rot = torch.eye(3)
+            post_tran[:2] = post_tran2
+            post_rot[:2, :2] = post_rot2
+            post_trans.append(post_tran)
+            post_rots.append(post_rot)
+        self.post_trans = torch.stack(post_trans).to('cuda')
+        self.post_rots = torch.stack(post_rots).to('cuda')
+        
+    def sample_augmentation(self):
+        H, W = 720, 1280
+        fH, fW = 128, 352
+ 
+        resize = max(fH/H, fW/W)
+        resize_dims = (int(W*resize), int(H*resize))
+        newW, newH = resize_dims
+        crop_h = int((1 - np.mean((0.0, 0.22)))*newH) - fH
+        crop_w = int(max(0, newW - fW) / 2)
+        crop = (crop_w, crop_h, crop_w + fW, crop_h + fH)
+        flip = False
+        rotate = 0
+        return resize, resize_dims, crop, flip, rotate
+
+    def lss_transform(self, post_rot, post_tran,
+                  resize, resize_dims, crop,
+                  flip, rotate):
+
+        # post-homography transformation
+        post_rot *= resize
+        post_tran -= torch.Tensor(crop[:2])
+
+        A = get_rot(rotate/180*np.pi)
+        b = torch.Tensor([crop[2] - crop[0], crop[3] - crop[1]]) / 2
+        b = A.matmul(-b) + b
+        post_rot = A.matmul(post_rot)
+        post_tran = A.matmul(post_tran) + b
+
+        return post_rot, post_tran
+
 
     def create_frustum(self):
         # make grid in image plane
@@ -197,7 +244,7 @@ class LSS(nn.Module):
         ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
 
         # D x H x W x 3
-        frustum = torch.stack((xs, ys, ds), -1)
+        frustum = torch.stack((xs, ys, ds), -1).to('cuda')
         return nn.Parameter(frustum, requires_grad=False)
 
     def get_geometry(self, rots, trans, intrins, post_rots, post_trans):
@@ -206,17 +253,18 @@ class LSS(nn.Module):
         Returns B x N x D x H/downsample x W/downsample x 3
         """
         B, N, _ = trans.shape
-
         # undo post-transformation
         # B x N x D x H x W x 3
-        points = self.frustum - post_trans.view(B, N, 1, 1, 1, 3)
-        points = torch.inverse(post_rots).view(B, N, 1, 1, 1, 3, 3).matmul(points.unsqueeze(-1))
+        points = self.frustum - post_trans.view(B, N, 1, 1, 1,3)
+        a = torch.inverse(post_rots).view(B,N,1,1,1,3,3)
+        points = a.matmul(points.unsqueeze(-1))
 
         # cam_to_ego
         points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],
                             points[:, :, :, :, :, 2:3]
                             ), 5)
-        combine = rots.matmul(torch.inverse(intrins))
+        combine = rots.matmul(torch.inverse(intrins)).to('cuda')
+
         points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += trans.view(B, N, 1, 1, 1, 3)
 
@@ -225,8 +273,7 @@ class LSS(nn.Module):
     def get_cam_feats(self, x):
         """Return B x N x D x H/downsample x W/downsample x C
         """
-        B, N, C, imH, imW = x.shape
-
+        B, N,  imH, imW , C = x.shape
         x = x.view(B*N, C, imH, imW)
         x = self.camencode(x)
         x = x.view(B, N, self.camC, self.D, imH//self.downsample, imW//self.downsample)
@@ -296,7 +343,7 @@ class LSS(nn.Module):
     def features(self, imgs):
 
         # BEV segmentation
-        imgs = self.get_voxels(imgs, self.rots, self.trans, self.intrins, post_rots, post_trans)
+        imgs = self.get_voxels(imgs, self.rots, self.trans, self.intrins, self.post_rots, self.post_trans)
         f = self.bevencode.features(imgs)
         # Driving parameters
         return f
