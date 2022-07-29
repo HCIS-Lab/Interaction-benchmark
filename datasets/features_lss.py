@@ -18,7 +18,7 @@ from MaskFormer.demo.demo import get_maskformer
 
 ###LSS
 # from pyquaternion import Quaternion
-
+print(torch.cuda.current_device())
 def scale_and_crop_image(image, scale=4.0, crop=256):
     """
     Scale and crop a PIL image, returning a channels-first numpy array.
