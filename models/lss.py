@@ -7,10 +7,13 @@ Authors: Jonah Philion and Sanja Fidler
 import torch
 from torch import nn
 from efficientnet_pytorch import EfficientNet
+import torchvision
 from torchvision.models.resnet import resnet18
 from pyquaternion import Quaternion
 from tool import gen_dx_bx, cumsum_trick, QuickCumsum, get_rot
 import numpy as np
+from PIL import Image
+device = torch.device('cuda:1')
 
 class Up(nn.Module):
     def __init__(self, in_channels, out_channels, scale_factor=2):
@@ -139,11 +142,12 @@ class BevEncode(nn.Module):
 
 
 class LSS(nn.Module):
-    def __init__(self, grid_conf, data_aug_conf, outC, scale=2, num_cam=1):
+    def __init__(self, grid_conf, data_aug_conf, outC, scale=4, num_cam=3):
         super(LSS, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
         self.num_cam = num_cam
+        self.scale = scale
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'],
                               self.grid_conf['ybound'],
@@ -162,51 +166,81 @@ class LSS(nn.Module):
 
         # toggle using QuickCumsum vs. autograd
         self.use_quickcumsum = True
-
-
-        h, w = 720, 1280
-        h, w = 720//scale, 1280//scale
-        h, w = h//2, w//2
-
-        self.intrins = [torch.Tensor([[float(5), float(0), float(w)], 
-                                       [float(0), float(5), float(h)], 
-                                       [float(0), float(0), float(1)]]),
-                        torch.Tensor([[float(5), float(0), float(w)], 
-                                       [float(0), float(5), float(h)], 
-                                       [float(0), float(0), float(1)]]),
-                        torch.Tensor([[float(5), float(0), float(w)], 
-                                       [float(0), float(5), float(h)], 
-                                       [float(0), float(0), float(1)]])]
-        intrins = self.intrins
-
-        self.intrins = torch.stack(intrins).to('cuda')
-        tmp = [intrins[0]]
-        self.trans = torch.stack(tmp).to('cuda')
-        tmp = []
-        for a in range(3):
-            rot = torch.Tensor(Quaternion([float(w), float(5), float(0), float(w)]).rotation_matrix)
-            tmp.append(rot)
-        self.rots = torch.stack(tmp).to('cuda')
-        post_trans = []
-        post_rots = []
-        for i in range(3):
-            post_tran = torch.zeros(2)
-            post_rot = torch.eye(2)
-            resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
-            post_tran2, post_rot2 = self.lss_transform(post_tran, post_rot, resize, resize_dims, crop, flip, rotate)
-            post_tran = torch.zeros(3)
-            post_rot = torch.eye(3)
-            post_tran[:2] = post_tran2
-            post_rot[:2, :2] = post_rot2
-            post_trans.append(post_tran)
-            post_rots.append(post_rot)
-        self.post_trans = torch.stack(post_trans).to('cuda')
-        self.post_rots = torch.stack(post_rots).to('cuda')
+        self.normalize_img = torchvision.transforms.Compose((
+                            torchvision.transforms.ToTensor(),
+                            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                        std=[0.229, 0.224, 0.225]),
+        ))
+    def get_image_data(self, imgs):
         
+        h, w = 720//self.scale, 1280//self.scale
+
+        batch_size = len(imgs[0])
+        b_images = []
+        b_intrins = []
+        b_rots = []
+        b_trans = []
+        b_post_rots = []
+        b_post_trans = []
+
+        for i in range(batch_size):
+            images = []
+            intrins = []
+            rots = []
+            trans = []
+            post_rots = []
+            post_trans = []
+            for j in range(self.num_cam):
+                post_rot = torch.eye(2)
+                post_tran = torch.zeros(2)
+                
+                intrin = torch.Tensor([[float(5), float(0), float(w)], 
+                                        [float(0), float(5), float(h)], 
+                                        [float(0), float(0), float(1)]])
+
+                tran = torch.Tensor([float(2.71671180725), float(0), float(0)])
+                if j == 0:
+                    rot = torch.Tensor(Quaternion([float(0.5), float(-0.5), float(0.5), float(-0.5)]).rotation_matrix)
+                elif j == 1:
+                    rot = torch.Tensor(Quaternion([float(0.67), float(-0.67), float(0.21), float(-0.21)]).rotation_matrix)
+                elif j == 2:
+                    rot = torch.Tensor(Quaternion([float(0.21), float(-0.21), float(0.67), float(-0.67)]).rotation_matrix)
+
+                resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
+                new_img, post_tran2, post_rot2 = self.img_transform(imgs[j][i], post_tran, post_rot, resize, resize_dims, crop, flip, rotate)
+                
+                post_rot = torch.eye(3)
+                post_tran = torch.zeros(3)
+                post_tran[:2] = post_tran2
+                post_rot[:2, :2] = post_rot2
+
+                images.append(self.normalize_img(new_img.convert('RGB')).permute(1, 2, 0))
+                intrins.append(intrin)
+                rots.append(rot)
+                trans.append(tran)
+                post_rots.append(post_rot)
+                post_trans.append(post_tran)
+                
+            b_images.append(torch.stack(images))
+            b_intrins.append(torch.stack(intrins))
+            b_rots.append(torch.stack(rots))
+            b_trans.append(torch.stack(trans))
+            b_post_rots.append(torch.stack(post_rots))
+            b_post_trans.append(torch.stack(post_trans))
+        return (
+            torch.stack(b_images).to(device),
+            torch.stack(b_rots).to(device),
+            torch.stack(b_trans).to(device),
+            torch.stack(b_intrins).to(device),
+            torch.stack(b_post_rots).to(device),
+            torch.stack(b_post_trans).to(device) 
+        )
+
     def sample_augmentation(self):
         H, W = 720, 1280
         fH, fW = 128, 352
  
+        
         resize = max(fH/H, fW/W)
         resize_dims = (int(W*resize), int(H*resize))
         newW, newH = resize_dims
@@ -217,22 +251,32 @@ class LSS(nn.Module):
         rotate = 0
         return resize, resize_dims, crop, flip, rotate
 
-    def lss_transform(self, post_rot, post_tran,
-                  resize, resize_dims, crop,
-                  flip, rotate):
+
+    def img_transform(self, img, post_rot, post_tran,
+                    resize, resize_dims, crop,
+                    flip, rotate):
+        # adjust image
+        img = img.resize(resize_dims)
+        img = img.crop(crop)
+        if flip:
+            img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
+        img = img.rotate(rotate)
 
         # post-homography transformation
         post_rot *= resize
         post_tran -= torch.Tensor(crop[:2])
-
+        if flip:
+            A = torch.Tensor([[-1, 0], [0, 1]])
+            b = torch.Tensor([crop[2] - crop[0], 0])
+            post_rot = A.matmul(post_rot)
+            post_tran = A.matmul(post_tran) + b
         A = get_rot(rotate/180*np.pi)
         b = torch.Tensor([crop[2] - crop[0], crop[3] - crop[1]]) / 2
         b = A.matmul(-b) + b
         post_rot = A.matmul(post_rot)
         post_tran = A.matmul(post_tran) + b
 
-        return post_rot, post_tran
-
+        return img, post_rot, post_tran
 
     def create_frustum(self):
         # make grid in image plane
@@ -244,7 +288,7 @@ class LSS(nn.Module):
         ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
 
         # D x H x W x 3
-        frustum = torch.stack((xs, ys, ds), -1).to('cuda')
+        frustum = torch.stack((xs, ys, ds), -1).to(device)
         return nn.Parameter(frustum, requires_grad=False)
 
     def get_geometry(self, rots, trans, intrins, post_rots, post_trans):
@@ -263,7 +307,7 @@ class LSS(nn.Module):
         points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3],
                             points[:, :, :, :, :, 2:3]
                             ), 5)
-        combine = rots.matmul(torch.inverse(intrins)).to('cuda')
+        combine = rots.matmul(torch.inverse(intrins)).to(device)
 
         points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += trans.view(B, N, 1, 1, 1, 3)
@@ -273,7 +317,7 @@ class LSS(nn.Module):
     def get_cam_feats(self, x):
         """Return B x N x D x H/downsample x W/downsample x C
         """
-        B, N,  imH, imW , C = x.shape
+        B, N, imH, imW,C  = x.shape
         x = x.view(B*N, C, imH, imW)
         x = self.camencode(x)
         x = x.view(B, N, self.camC, self.D, imH//self.downsample, imW//self.downsample)
@@ -284,10 +328,9 @@ class LSS(nn.Module):
     def voxel_pooling(self, geom_feats, x):
         B, N, D, H, W, C = x.shape
         Nprime = B*N*D*H*W
-
         # flatten x
         x = x.reshape(Nprime, C)
-
+        
         # flatten indices
         geom_feats = ((geom_feats - (self.bx - self.dx/2.)) / self.dx).long()
         geom_feats = geom_feats.view(Nprime, 3)
@@ -327,13 +370,14 @@ class LSS(nn.Module):
 
     def get_voxels(self, x, rots, trans, intrins, post_rots, post_trans):
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # torch.Size([4, 5, 41, 8, 22, 3])
+        print(geom.shape)
         x = self.get_cam_feats(x)   # torch.Size([4, 5, 41, 8, 22, 64])
-
         x = self.voxel_pooling(geom, x) # torch.Size([4, 64, 200, 200])
 
         return x
 
-    def forward(self, imgs, rots, trans, intrins, post_rots, post_trans):
+    def forward(self, imgs):
+        imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(imgs)
         # BEV segmentation
         imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
         segs = self.bevencode(imgs)
@@ -341,9 +385,9 @@ class LSS(nn.Module):
         return segs
 
     def features(self, imgs):
-
+        imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(imgs)
         # BEV segmentation
-        imgs = self.get_voxels(imgs, self.rots, self.trans, self.intrins, self.post_rots, self.post_trans)
+        imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
         f = self.bevencode.features(imgs)
         # Driving parameters
         return f

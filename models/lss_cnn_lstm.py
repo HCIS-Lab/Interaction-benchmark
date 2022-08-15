@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from MaskFormer.demo.demo import get_maskformer
 from retrieval_head import Head, Road_Head
 
-
 class CNNLSTM_maskformer(nn.Module):
     def __init__(self, num_cam, num_ego_class, num_actor_class, road):
         super(CNNLSTM_maskformer, self).__init__()
@@ -15,32 +14,32 @@ class CNNLSTM_maskformer(nn.Module):
         # self.backbone = get_maskformer()
         self.conv1 = nn.Sequential(
                 nn.ReLU(inplace=False),
-                nn.Conv2d(2048*self.num_cam, 1024*self.num_cam, kernel_size=1, stride=1, padding='same'),
-                nn.BatchNorm2d(1024*self.num_cam),
+                nn.Conv2d(256, 128, kernel_size=1, stride=1, padding='same'),
+                nn.BatchNorm2d(128),
                 nn.ReLU(inplace=False),
-                nn.Conv2d(1024*self.num_cam, 1024, kernel_size=1, stride=1, padding='same'),
-                nn.BatchNorm2d(1024),
+                nn.Conv2d(128, 128, kernel_size=1, stride=1, padding='same'),
+                nn.BatchNorm2d(128),
                 nn.ReLU(inplace=False),
-                nn.Conv2d(1024, 512, kernel_size=1, stride=1, padding='same'),
-                nn.BatchNorm2d(512)
+                nn.Conv2d(128, 64, kernel_size=1, stride=1, padding='same'),
+                nn.BatchNorm2d(64)
                     )
 
         self.conv2 = nn.Sequential(
                 nn.ReLU(inplace=True),
-                nn.Conv2d(512 , 400, kernel_size=3, stride=1, padding='same'),
-                nn.BatchNorm2d(400),
+                nn.Conv2d(64 , 40, kernel_size=3, stride=1, padding='same'),
+                nn.BatchNorm2d(40),
                 nn.ReLU(inplace=True),
-                nn.Conv2d(400, 256, kernel_size=3, stride=1, padding='same'),
-                nn.BatchNorm2d(256),
+                nn.Conv2d(40, 32, kernel_size=3, stride=1, padding='same'),
+                nn.BatchNorm2d(32),
                 nn.ReLU(inplace=True)
                     )
 
-        self.en_lstm = nn.LSTM(input_size=256, hidden_size=128, num_layers=1, batch_first=True)
+        self.en_lstm = nn.LSTM(input_size=32, hidden_size=16, num_layers=1, batch_first=True)
 
         # self.en_lstm = ConvLSTM(256, 256, 3, 1, True, True, True)
         self.pool = nn.AdaptiveAvgPool2d((1,1))
 
-        self.head = Head(128, num_ego_class, num_actor_class)
+        self.head = Head(16, num_ego_class, num_actor_class)
 
         if self.road:
             self.road_enc = nn.Sequential(
@@ -118,37 +117,22 @@ class CNNLSTM_maskformer(nn.Module):
             return ego, actor
 
 
-    def forward(self, fronts, lefts, rights, tops=False):
-        hidden = None
-        if not tops:
-            batch_size = fronts[0].shape[0]
-            seq_len = len(fronts)
-            w, h = fronts[0].shape[2], fronts[0].shape[3]
-        else:
-            batch_size = tops[0].shape[0]
-            seq_len = len(tops)
-            w, h = tops[0].shape[2], tops[0].shape[3]
+    def forward(self, bev_f):
+        batch_size = bev_f[0].shape[0]
+        seq_len = len(bev_f)
+        w, h = bev_f[0].shape[1], bev_f[0].shape[2]
 
         for t in range(seq_len):
-            x = []
-            if not tops:
-                x.append(fronts[t])
-                x.append(lefts[t])
-                x.append(rights[t])
-            else:
-                x.append(tops[t])
-
-            x = torch.stack(x, dim=0).view(batch_size*self.num_cam, 3, w, h)
-            x = self.backbone(x)['res5']
+            x = bev_f[t]
             x = self.conv1(x)
             x = self.conv2(x)
             x = self.pool(x)
             x = torch.flatten(x, 1)
-
+            print(x.shape)
             out, hidden = self.en_lstm(x.view(batch_size, 1, 256), hidden)
 
         ego, actor = self.head(out[:, -1, :])
         return ego, actor
 
 
-        
+    
