@@ -143,10 +143,12 @@ class BevEncode(nn.Module):
 
 class LSS(nn.Module):
     def __init__(self, grid_conf, data_aug_conf, outC, scale=4, num_cam=3):
+
         super(LSS, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
         self.num_cam = num_cam
+
         self.scale = scale
 
         dx, bx, nx = gen_dx_bx(self.grid_conf['xbound'],
@@ -173,7 +175,9 @@ class LSS(nn.Module):
         ))
     def get_image_data(self, imgs):
         
+        h, w = 720, 1280
         h, w = 720//self.scale, 1280//self.scale
+        h, w = h//2, w//2
 
         batch_size = len(imgs[0])
         b_images = []
@@ -236,11 +240,12 @@ class LSS(nn.Module):
             torch.stack(b_post_trans).to(device) 
         )
 
+
+
+     
     def sample_augmentation(self):
         H, W = 720, 1280
         fH, fW = 128, 352
- 
-        
         resize = max(fH/H, fW/W)
         resize_dims = (int(W*resize), int(H*resize))
         newW, newH = resize_dims
@@ -261,7 +266,6 @@ class LSS(nn.Module):
         if flip:
             img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
         img = img.rotate(rotate)
-
         # post-homography transformation
         post_rot *= resize
         post_tran -= torch.Tensor(crop[:2])
@@ -270,6 +274,7 @@ class LSS(nn.Module):
             b = torch.Tensor([crop[2] - crop[0], 0])
             post_rot = A.matmul(post_rot)
             post_tran = A.matmul(post_tran) + b
+
         A = get_rot(rotate/180*np.pi)
         b = torch.Tensor([crop[2] - crop[0], crop[3] - crop[1]]) / 2
         b = A.matmul(-b) + b
@@ -288,6 +293,7 @@ class LSS(nn.Module):
         ys = torch.linspace(0, ogfH - 1, fH, dtype=torch.float).view(1, fH, 1).expand(D, fH, fW)
 
         # D x H x W x 3
+
         frustum = torch.stack((xs, ys, ds), -1).to(device)
         return nn.Parameter(frustum, requires_grad=False)
 
@@ -309,6 +315,7 @@ class LSS(nn.Module):
                             ), 5)
         combine = rots.matmul(torch.inverse(intrins)).to(device)
 
+
         points = combine.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += trans.view(B, N, 1, 1, 1, 3)
 
@@ -318,6 +325,7 @@ class LSS(nn.Module):
         """Return B x N x D x H/downsample x W/downsample x C
         """
         B, N, imH, imW,C  = x.shape
+
         x = x.view(B*N, C, imH, imW)
         x = self.camencode(x)
         x = x.view(B, N, self.camC, self.D, imH//self.downsample, imW//self.downsample)
@@ -328,9 +336,9 @@ class LSS(nn.Module):
     def voxel_pooling(self, geom_feats, x):
         B, N, D, H, W, C = x.shape
         Nprime = B*N*D*H*W
+
         # flatten x
         x = x.reshape(Nprime, C)
-        
         # flatten indices
         geom_feats = ((geom_feats - (self.bx - self.dx/2.)) / self.dx).long()
         geom_feats = geom_feats.view(Nprime, 3)
@@ -370,14 +378,15 @@ class LSS(nn.Module):
 
     def get_voxels(self, x, rots, trans, intrins, post_rots, post_trans):
         geom = self.get_geometry(rots, trans, intrins, post_rots, post_trans) # torch.Size([4, 5, 41, 8, 22, 3])
-        print(geom.shape)
         x = self.get_cam_feats(x)   # torch.Size([4, 5, 41, 8, 22, 64])
         x = self.voxel_pooling(geom, x) # torch.Size([4, 64, 200, 200])
 
         return x
 
+
     def forward(self, imgs):
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(imgs)
+
         # BEV segmentation
         imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
         segs = self.bevencode(imgs)
@@ -385,9 +394,12 @@ class LSS(nn.Module):
         return segs
 
     def features(self, imgs):
+
         imgs, rots, trans, intrins, post_rots, post_trans = self.get_image_data(imgs)
+
         # BEV segmentation
         imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
+
         f = self.bevencode.features(imgs)
         # Driving parameters
         return f

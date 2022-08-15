@@ -13,6 +13,7 @@ class CNNLSTM_maskformer(nn.Module):
         self.num_cam = num_cam
         self.road = road
         # self.backbone = get_maskformer()
+
         self.conv1 = nn.Sequential(
                 nn.ReLU(inplace=False),
                 nn.Conv2d(2048*self.num_cam, 1024*self.num_cam, kernel_size=1, stride=1, padding='same'),

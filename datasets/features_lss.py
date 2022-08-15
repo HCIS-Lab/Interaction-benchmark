@@ -16,19 +16,13 @@ from lss_cnn_lstm import CNNLSTM_maskformer
 device = torch.device('cuda:1')
 ###LSS
 # from pyquaternion import Quaternion
-#sign = True
+
 def save_feature(features, path_list):
    
     for i in range(features.shape[0]):
         f = features[i,:,:,:]
         f = f.numpy()
-        ''''if(i==0):
-            if(sign):
-                a = f
-                sign = False
-            else:
-                if(a == f):
-                    print('the same')'''
+
         np.save(path_list[i], f)
 
 scale=4
@@ -184,7 +178,7 @@ for t, type in enumerate(type_list):
                 for i in range(1, 12):
                     bev_segmentation = torch.cat([bev_segmentation, bev_seg[i]], dim=0)
                     bev_features = torch.cat([bev_features, bev_f[i]], dim=0)
-            print(bev_segmentation.shape)
+
             save_feature(bev_segmentation, n_bevs_seg)
             save_feature(bev_features, n_bevs)
             
