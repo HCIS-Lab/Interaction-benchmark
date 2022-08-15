@@ -22,6 +22,7 @@ def save_feature(features, path_list):
     for i in range(features.shape[0]):
         f = features[i,:,:,:]
         f = f.numpy()
+        print(f)
         np.save(path_list[i], f)
 
 scale=4
