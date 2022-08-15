@@ -213,7 +213,6 @@ for t, type in enumerate(type_list):
             t_l = threading.Thread(target=save_feature, args=(l_features, n_lefts))
             t_l.start()
 
-
             # ---------------------------------------------
             # left_tensor = left_tensor.to('cuda', dtype=torch.float32)
             # with torch.no_grad():   
@@ -223,20 +222,6 @@ for t, type in enumerate(type_list):
             # t_l = threading.Thread(target=save_feature, args=(l_features, n_lefts))
             # t_l.start()
 
-
-            # # ---------------------------------------------
-            # right_tensor = right_tensor.to('cuda', dtype=torch.float32)
-            # with torch.no_grad():   
-            #     right_tensor = (right_tensor - model.pixel_mean) / model.pixel_std
-            #     r_features = model.backbone(right_tensor)['res5']
-
-            # t_r = threading.Thread(target=save_feature, args=(r_features, n_rights))
-            # t_r.start()
-
-
-            t_f.join()
-            t_l.join()
-            t_r.join()
 
             # # ---------------------------------------------
             # right_tensor = right_tensor.to('cuda', dtype=torch.float32)
