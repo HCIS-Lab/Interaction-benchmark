@@ -177,7 +177,7 @@ for t, type in enumerate(type_list):
                 for i in range(1, 12):
                     bev_segmentation = torch.cat([bev_segmentation, bev_seg[i]], dim=0)
                     bev_features = torch.cat([bev_features, bev_f[i]], dim=0)
-
+            print(bev_segmentation.shape)
             save_feature(bev_segmentation, n_bevs_seg)
             save_feature(bev_features, n_bevs)
             
