@@ -16,13 +16,19 @@ from lss_cnn_lstm import CNNLSTM_maskformer
 device = torch.device('cuda:1')
 ###LSS
 # from pyquaternion import Quaternion
-
+#sign = True
 def save_feature(features, path_list):
    
     for i in range(features.shape[0]):
         f = features[i,:,:,:]
         f = f.numpy()
-        print(f)
+        ''''if(i==0):
+            if(sign):
+                a = f
+                sign = False
+            else:
+                if(a == f):
+                    print('the same')'''
         np.save(path_list[i], f)
 
 scale=4
