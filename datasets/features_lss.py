@@ -11,18 +11,27 @@ import sys
 import json 
 sys.path.append('../models')
 from lss import LSS
-from lss_cnn_lstm import CNNLSTM_maskformer
+from data_lss import compile_data
 
 device = torch.device('cuda:1')
 ###LSS
 # from pyquaternion import Quaternion
+COLOR = np.uint8([
+        (0, 0, 0),
+        (66, 62, 64),
+        (116, 191, 101),
+        (255, 255, 255),
+        (136, 138, 133),
+        (0, 0, 142),
+        (220, 20, 60),
+        (0, 0, 1)
+        ])
+
 
 def save_feature(features, path_list):
-   
     for i in range(features.shape[0]):
         f = features[i,:,:,:]
-        f = f.numpy()
-
+        f = f.cpu().detach().numpy()
         np.save(path_list[i], f)
 
 scale=4
@@ -48,21 +57,20 @@ data_aug_conf = {
     'H': 720, 'W': 1280,
     'rand_flip': True,
     'bot_pct_lim': (0.0, 0.22),
-    'cams': ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT'],
+    'cams': ['left', 'front', 'right'],
     'Ncams': 3
 }
 
-model = LSS(grid_conf, data_aug_conf, outC=1, scale=scale).to(device)
-pretrained_dict = torch.load('../models/model525000.pt')
-# model_dict = model.state_dict()
-# pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-# model_dict.update(pretr)
+model = LSS(grid_conf, data_aug_conf, outC=6).to(device)
+pretrained_dict = torch.load('../models/model139000.pt')
+model_dict = model.state_dict()
+pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+model_dict.update(pretrained_dict)
 model.load_state_dict(pretrained_dict)
+
 
 model.eval()
 
-model2 = CNNLSTM_maskformer(num_cam=3, num_ego_class=1, num_actor_class=1, road=False).to(device)
-model2.train()
 
 for t, type in enumerate(type_list):
     basic_scenarios = [os.path.join(root, type, s) for s in os.listdir(os.path.join(root, type))]
@@ -108,10 +116,7 @@ for t, type in enumerate(type_list):
     
                 if not os.path.isdir(save_v + "/r5_"+str(scale)+"/bev/"):
                     os.mkdir(save_v + "/r5_"+str(scale)+"/bev/")
-                if not os.path.isdir(save_v + "/r5_"+str(scale)+"/bev_seg/"):
-                    os.mkdir(save_v + "/r5_"+str(scale)+"/bev_seg/")
                 n_bevs = [save_v +"/r5_"+str(scale)+"/bev/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
-                n_bevs_seg = [save_v +"/r5_"+str(scale)+"/bev_seg/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/front/")]
             # ---------------------
             if os.path.isdir(v+"/rgb/right/"):
                 rights = [v+"/rgb/right/"+ img for img in os.listdir(v+"/rgb/right/") if os.path.isfile(v+"/rgb/right/"+ img)]
@@ -125,62 +130,82 @@ for t, type in enumerate(type_list):
                     os.mkdir(save_v + "/r5_"+str(scale)+"/left/")
                 n_lefts = [save_v +"/r5_"+str(scale)+"/left/"+ img[:9]+'npy' for img in os.listdir(v+"/rgb/left/")]
             
+
+            
+
             fronts = sorted(fronts)
             lefts = sorted(lefts)
             rights = sorted(rights)
 
+            n_bevs = sorted(n_bevs)
+
+
             front_tensor = []
             for i in range(len(fronts)):
                 try:
-                    front_tensor.append(Image.open(fronts[i]))
+                    front_img = Image.open(fronts[i]).convert('RGB')
+                    front_tensor.append(front_img)
                 except:
                     print(fronts[i])
             left_tensor = []
             for i in range(len(lefts)):
                 try:
-                    left_tensor.append(Image.open(lefts[i]))
+                    left_img = Image.open(lefts[i]).convert('RGB')
+                    left_tensor.append(left_img)
                 except:
                     print(lefts[i])
             right_tensor = []
             for i in range(len(rights)):
                 try:
-                    right_tensor.append(Image.open(rights[i]))
+                    right_img = Image.open(rights[i]).convert('RGB')
+                    right_tensor.append(right_img)
                 except:
                     print(rights[i])
             
 
-            l = len(front_tensor) // 12
-            front_tensor_ls = []
-            left_tensor_ls = []
-            right_tensor_ls = []
+            length = len(front_tensor)
+            bev_tensor_ls = []
             try:
-                for i in range(12):
-                    front_tensor_ls.append(front_tensor[i*l:(i+1)*l])
-                    left_tensor_ls.append(left_tensor[i*l:(i+1)*l])
-                    right_tensor_ls.append(right_tensor[i*l:(i+1)*l])
+                for i in range(length):
+                    bev_tensor_ls.append([left_tensor[i], front_tensor[i], right_tensor[i]])
             except:
                 print("empty stack")
                 continue
-
+            
             with torch.no_grad():
-                bev_seg = [None for _ in range(12)]
-                bev_f = [None for _ in range(12)]
-                bev_tensor_ls = [None for _ in range(12)]
 
-                for i in range(12):      
-                    bev_tensor_ls[i] = [front_tensor_ls[i], left_tensor_ls[i], right_tensor_ls[i]]
-                    bev_seg[i] = model(bev_tensor_ls[i]).cpu()
-                    bev_f[i] = model.features(bev_tensor_ls[i]).cpu()
+                bev_f = [None for _ in range(length)]
 
-                bev_segmentation = torch.cat([bev_seg[0]], dim=0)
+                for i in range(length): 
+                    bev_seg = model(bev_tensor_ls[i])
+
+                    bev_f[i] = model.features(bev_tensor_ls[i])
+                    segs = bev_seg.clone().sigmoid().cuda()
+                    mi, _ = torch.max(segs, dim=1)
+                    mi = mi.view((1, 1, 200, 200))
+                    drivable_area = torch.zeros_like(mi)
+                    drivable_area[mi > 0.5] = 1
+                    non_drive = torch.ones((1, 1, 200, 200)).cuda() - drivable_area
+                    new_class = torch.ones((1, 1, 200, 200)).cuda()
+                    new_class[:, :, :100, :] = 0
+
+                    pred_cat = torch.cat((non_drive, torch.unsqueeze(segs[:,3,:,:],1), torch.unsqueeze(segs[:,1,:,:],1),
+                                        torch.unsqueeze(segs[:,4,:,:],1), torch.unsqueeze(segs[:,5,:,:],1),
+                                        torch.unsqueeze(segs[:,0,:,:],1),
+                                        torch.unsqueeze(segs[:,2,:,:],1), new_class), 1) # shape(_, 8, 200, 200)
+                    
+                    new_pred_cat = np.zeros((1, 8, 200, 200))
+                    pred_cat_c = np.asarray(pred_cat.clone().cpu())[:, :, 0:100, 0:200]
+                    new_pred_cat[:, :, 100:200, :] = pred_cat_c
+                    segs = torch.from_numpy(new_pred_cat).cuda()
+                    
+                    result = Image.fromarray(COLOR[segs[0].argmax(0).detach().cpu().numpy()])
+                    result.save('./og_results/eval_{}.png'.format(str(i).zfill(4)))  
+
+
                 bev_features = torch.cat([bev_f[0]], dim=0)
 
-                for i in range(1, 12):
-                    bev_segmentation = torch.cat([bev_segmentation, bev_seg[i]], dim=0)
+                for i in range(1, length):
                     bev_features = torch.cat([bev_features, bev_f[i]], dim=0)
-
-            save_feature(bev_segmentation, n_bevs_seg)
-            save_feature(bev_features, n_bevs)
-            
-            # bev_features = bev_features.to(device)
-            # ego, actor = model2(bev_features)
+                
+                save_feature(bev_features, n_bevs)
