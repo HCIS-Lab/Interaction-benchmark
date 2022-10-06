@@ -1,13 +1,18 @@
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import os
 import sys
 import numpy as np
 from PIL import Image
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from pyquaternion import Quaternion
 from tqdm import tqdm
 from tool import img_transform, normalize_img, gen_dx_bx
 from torchvision import transforms
+import common
+import random
 
 class NuscData(Dataset):
     def __init__(self, data_root, grid_conf, data_aug_conf, is_train):
@@ -19,17 +24,18 @@ class NuscData(Dataset):
         self.dx, self.bx, self.nx = dx.numpy(), bx.numpy(), nx.numpy()
         self.is_train = is_train
         self.samples = self.prepro()
-        
+            
 
     def __len__(self):
         return len(self.samples)
 
     def prepro(self):
         
+        
         if self.is_train:
             samples = []
-            basic_scenarios = [os.path.join(self.data_root, self.type_list[0], s) for s in os.listdir(os.path.join(self.data_root, self.type_list[0])) if '6_' in s[:2] or '7_' in s[:2]]
-            
+            basic_scenarios = [os.path.join(self.data_root, self.type_list[0], s) for s in os.listdir(os.path.join(self.data_root, self.type_list[0])) if '10_' in s[:3] or '6_' in s[:2] or '7_' in s[:2]]
+            basic_scenarios = random.sample(basic_scenarios, 64)
             for s in tqdm(basic_scenarios, file=sys.stdout): 
                 variants_path = os.path.join(s, 'variant_scenario')
                 variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path) if os.path.isdir(os.path.join(variants_path, v))]
@@ -46,12 +52,13 @@ class NuscData(Dataset):
                         end_frame = max(names)
                         break
 
-                    samples += [{'path': v, 'frame': i} for i in range(start_frame, end_frame+1)]
+                    samples += [{'path': v, 'frame': i} for i in range(start_frame, end_frame+1, 5)]
 
             return samples
         else:
             samples = []
-            basic_scenarios = [os.path.join(self.data_root, self.type_list[0], s) for s in os.listdir(os.path.join(self.data_root, self.type_list[0])) if '10_' in s[:3]]
+            basic_scenarios = [os.path.join(self.data_root, self.type_list[0], s) for s in os.listdir(os.path.join(self.data_root, self.type_list[0])) if '10_' in s[:3] or '6_' in s[:2] or '7_' in s[:2]]
+            basic_scenarios = random.sample(basic_scenarios, 8)
             for s in tqdm(basic_scenarios, file=sys.stdout): 
                 variants_path = os.path.join(s, 'variant_scenario')
                 variants = [os.path.join(variants_path, v) for v in os.listdir(variants_path) if os.path.isdir(os.path.join(variants_path, v))]
@@ -68,7 +75,7 @@ class NuscData(Dataset):
                         end_frame = max(names)
                         break
 
-                    samples += [{'path': v, 'frame': i} for i in range(start_frame, end_frame+1)]
+                    samples += [{'path': v, 'frame': i} for i in range(start_frame, end_frame+1, 5)]
 
             return samples
         # samples = []
@@ -134,7 +141,7 @@ class NuscData(Dataset):
                 rot = torch.Tensor(Quaternion([float(0.5), float(-0.5), float(0.5), float(-0.5)]).rotation_matrix)
             elif i == 2:
                 rot = torch.Tensor(Quaternion([float(-0.2124774), float(0.2124774), float(-0.6744282), float(0.6744282)]).rotation_matrix)
-              
+            
             resize, resize_dims, crop, flip, rotate = self.sample_augmentation()
             img, post_rot2, post_tran2 = img_transform(img, post_rot, post_tran, resize, resize_dims, crop, flip, rotate)
             
@@ -149,10 +156,18 @@ class NuscData(Dataset):
             trans.append(tran)
             post_rots.append(post_rot)
             post_trans.append(post_tran)
+            # self.samples[index]['path'], self.samples[index]['frame'], 
         return (
             torch.stack(images), torch.stack(rots), torch.stack(trans),
             torch.stack(intrins), torch.stack(post_rots), torch.stack(post_trans)
         )
+
+    def preprocess_semantic(self, topdown):
+        topdown = common.CONVERTER[topdown]
+        topdown = torch.LongTensor(topdown)
+        topdown = F.one_hot(topdown, 10).permute(2, 0, 1).float()
+        return topdown
+
 
     def get_binimg(self, index):
         if os.path.isdir(os.path.join(self.samples[index]['path'], 'instance_segmentation/lbc_ins')):
@@ -160,37 +175,17 @@ class NuscData(Dataset):
             bin_path = os.path.join(self.samples[index]['path'], 'instance_segmentation/lbc_ins')
             if os.path.isfile(os.path.join(bin_path, "{:08d}".format(self.samples[index]['frame']) + '.png')):
                 bin_name = os.path.join(bin_path, "{:08d}".format(self.samples[index]['frame']) + '.png')
-                bin_img = Image.open(bin_name).convert('RGB').resize((200, 200))
-                bin_img = transforms.ToTensor()(bin_img) * 255
-                new_bin_img = torch.zeros((10, 200, 200))
-                for i in range(200):
-                    for j in range(200):
-                        if bin_img[0][i, j] == 1: #buildings
-                            new_bin_img[0][i, j] = 1
-                        elif bin_img[0][i, j] == 2: #fences
-                            new_bin_img[1][i, j] = 1
-                        elif bin_img[0][i, j] == 4: #Pedestrains 
-                            new_bin_img[2][i, j] = 1
-                        elif bin_img[0][i, j] == 5: #Poles
-                            new_bin_img[3][i, j] = 1
-                        elif bin_img[0][i, j] == 6: #Roadlines
-                            new_bin_img[4][i, j] = 1
-                        elif bin_img[0][i, j] == 7: #Roads
-                            new_bin_img[5][i, j] = 1
-                        elif bin_img[0][i, j] == 8: #Sidewalks
-                            new_bin_img[6][i, j] = 1
-                        elif bin_img[0][i, j] == 10: #Vehicles
-                            new_bin_img[7][i, j] = 1
-                        elif bin_img[0][i, j] == 11: #Walls
-                            new_bin_img[8][i, j] = 1
-                        else: #Others
-                            new_bin_img[9][i, j] = 1
-
-                return new_bin_img
+                with Image.open(bin_name) as topdown_image:
+                    
+                    topdown_image = topdown_image.resize((256, 256)).crop((0, 0, 256, 128))
+                    topdown = np.array(topdown_image)
+                    topdown = topdown[:, :, 0]
+                    topdown = self.preprocess_semantic(topdown)
+                    return topdown
             else:
-                return torch.zeros((10, 200, 200))
+                return torch.zeros((10, 128, 256))
         else:
-            return torch.zeros((10, 200, 200))
+            return torch.zeros((10, 128, 256))
 
 
 class SegmentationData(NuscData):
@@ -199,17 +194,17 @@ class SegmentationData(NuscData):
 
     def __getitem__(self, index):
         cams = ['left', 'front', 'right']
+        # path, frame
         images, rots, trans, intrins, post_rots, post_trans = self.get_image_data(index, cams)
         binimg = self.get_binimg(index)
         return images, rots, trans, intrins, post_rots, post_trans, binimg
-
 
 def compile_data(data_root, grid_conf, data_aug_conf, batch_size):
     train_data = SegmentationData(data_root=data_root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, is_train=True)
     val_data = SegmentationData(data_root=data_root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, is_train=False)
     train_loader = DataLoader(train_data,
                             batch_size=batch_size,
-                            shuffle=False,
+                            shuffle=True,
                             num_workers=10
                             )
     val_loader = DataLoader(val_data,

@@ -227,17 +227,45 @@ class SimpleLoss(torch.nn.Module):
         loss = self.loss_fn(ypred, ytgt)
         return loss
 
+class FocalLoss(torch.nn.Module):
+    def __init__(self):
+        super(FocalLoss, self).__init__()
+
+    def forward(self):
+        pass
+
 
 def get_batch_iou(preds, binimgs):
     """Assumes preds has NOT been sigmoided yet
     """
+    intersects = torch.zeros(10)
+    unions = torch.zeros(10)
     with torch.no_grad():
         pred = (preds > 0)
         tgt = binimgs.bool()
-        intersect = (pred & tgt).sum().float().item()
-        union = (pred | tgt).sum().float().item()
-    return intersect, union, intersect / union if (union > 0) else 1.0
+        intersects = torch.sum((pred & tgt).permute(1,0,2,3), dim=(1, 2, 3)).float()
+        unions = torch.sum((pred | tgt).permute(1,0,2,3), dim=(1, 2, 3)).float()
+        intersect = torch.sum((pred & tgt)).float().item()
+        union = torch.sum((pred | tgt)).float().item()
+        print(intersect,union)
+    return  intersects, unions, intersect, union
 
+def get_pedestrian_ratio(preds, binimgs):
+    pre_num = 0
+    GT_num = 0
+    ans = 0
+    with torch.no_grad():
+        pred = (preds > 0)
+        tgt = binimgs.bool()
+        temp = torch.sum((pred).permute(1,0,2,3), dim=(1, 2, 3)).float()
+        pre_num = temp[3].item()
+        temp = torch.sum((tgt).permute(1,0,2,3), dim=(1, 2, 3)).float()
+        GT_num = temp[3].item()
+        if(GT_num == 0):
+            ans = -1
+        else:
+            ans = pre_num/GT_num
+    return ans
 
 def get_val_info(model, valloader, loss_fn, device, use_tqdm=False):
     model.eval()

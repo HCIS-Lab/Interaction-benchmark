@@ -83,7 +83,7 @@ class BevEncode(nn.Module):
     def __init__(self, inC, outC):
         super(BevEncode, self).__init__()
 
-        trunk = resnet18(pretrained=False, zero_init_residual=True)
+        trunk = resnet18(weights=None, zero_init_residual=True)
         self.conv1 = nn.Conv2d(inC, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = trunk.bn1    # batchnorm
@@ -95,7 +95,7 @@ class BevEncode(nn.Module):
 
         self.up1 = Up(64+256, 256, scale_factor=4)
         self.up2 = nn.Sequential(
-            nn.Upsample(scale_factor=2, mode='bilinear',
+            nn.Upsample(scale_factor=2.56, mode='bilinear',
                               align_corners=True),
             nn.Conv2d(256, 128, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(128),
@@ -125,9 +125,9 @@ class BevEncode(nn.Module):
         x = self.layer2(x1) 
         x = self.layer3(x) # x: torch.Size([4, 256, 25, 25])
 
-        x = self.up1(x, x1) # x up1: torch.Size([4, 256, 100, 100])
+        # x = self.up1(x, x1) # x up1: torch.Size([4, 256, 100, 100])
 
-        return x
+        return x1, x
 
 class LiftSplatShoot(nn.Module):
     def __init__(self, grid_conf, data_aug_conf, outC):
@@ -261,9 +261,9 @@ class LiftSplatShoot(nn.Module):
     def features(self, imgs, rots, trans, intrins, post_rots, post_trans):
                 # BEV segmentation
         imgs = self.get_voxels(imgs, rots, trans, intrins, post_rots, post_trans)
-        segs = self.bevencode.features(imgs)
+        x1, x = self.bevencode.features(imgs)
 
-        return segs
+        return x1, x
 
 def compile_model(grid_conf, data_aug_conf, outC):
     return LiftSplatShoot(grid_conf, data_aug_conf, outC)

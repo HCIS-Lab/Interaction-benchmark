@@ -8,15 +8,17 @@ import os
 device = torch.device('cuda:1')
 
 COLOR = np.uint8([
-        (0, 0, 0),
-        (66, 62, 64),
-        (116, 191, 101),
-        (255, 255, 255),
-        (136, 138, 133),
-        (0, 0, 142),
-        (220, 20, 60),
-        (0,0,1)
-        ])
+    (0, 0, 0),
+    (70, 70, 70),
+    (100, 40, 40),
+    (220, 20, 60),
+    (153, 153, 153),
+    (157, 234, 50),
+    (128, 64, 128),
+    (244, 35, 232),
+    (0, 0, 142),
+    (102, 102, 156)
+])
 
 
 def save_feature(features, path_list):
@@ -26,7 +28,7 @@ def save_feature(features, path_list):
         np.save(path_list[i], f)
 
 root='/data/carla_dataset/data_collection/'
-save_root='/data/carla_feature/data_collection'
+# save_root='/data/carla_feature/data_collection'
 
 type_list = ['interactive']
 
@@ -49,14 +51,11 @@ data_aug_conf = {
 }
     
 
-train_loader = compile_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf)
+train_loader, val_loader = compile_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, batch_size=1)
 print(f'len: {len(train_loader)}')
-model = compile_model(grid_conf, data_aug_conf, outC=6)
-pretrained_dict = torch.load('../models/model139000.pt')
-model_dict = model.state_dict()
-pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-model_dict.update(pretrained_dict)
-model.load_state_dict(pretrained_dict)
+model = compile_model(grid_conf, data_aug_conf, outC=10)
+model.load_state_dict(torch.load('model.pt'))
+
 model.to(device)
 
 model.eval()
@@ -67,11 +66,12 @@ if not os.path.isdir('./results'):
 for file in os.listdir('./results'):
     os.remove('./results/' + file)
 
+
 with torch.no_grad():
     total_intersect = 0.0
     total_union = 0.0
     for batchi, data in enumerate(train_loader):
-        imgs, rots, trans, intrins, post_rots, post_trans = data
+        imgs, rots, trans, intrins, post_rots, post_trans, binimgs = data
         pred_segs = model(
                         imgs.to(device),
                         rots.to(device),
@@ -80,28 +80,11 @@ with torch.no_grad():
                         post_rots.to(device),
                         post_trans.to(device)
                         )
-
-        segs = pred_segs.clone().sigmoid().cuda()
-        mi, _ = torch.max(segs, dim=1)
-        mi = mi.view((1, 1, 200, 200))
-        drivable_area = torch.zeros_like(mi)
-        drivable_area[mi > 0.5] = 1
-        non_drive = torch.ones((1, 1, 200, 200)).cuda() - drivable_area
-        new_class = torch.ones((1, 1, 200, 200)).cuda()
-        new_class[:, :, :100, :] = 0
-
-        pred_cat = torch.cat((non_drive, torch.unsqueeze(segs[:,3,:,:],1), torch.unsqueeze(segs[:,1,:,:],1),
-                            torch.unsqueeze(segs[:,4,:,:],1), torch.unsqueeze(segs[:,5,:,:],1),
-                            torch.unsqueeze(segs[:,0,:,:],1),
-                            torch.unsqueeze(segs[:,2,:,:],1), new_class), 1) # shape(_, 8, 200, 200)
-        
-        new_pred_cat = np.zeros((1, 8, 200, 200))
-        pred_cat_c = np.asarray(pred_cat.clone().cpu())[:, :, 0:100, 0:200]
-        new_pred_cat[:, :, 0:100, :] = pred_cat_c
-        segs = torch.from_numpy(new_pred_cat).cuda()
-        
-        result = Image.fromarray(COLOR[segs[0].argmax(0).detach().cpu().numpy()])
-        
+        pred_segs = pred_segs[:, :, :128, :]
+        segs = pred_segs.clone().sigmoid()
+        seg_class = torch.argmax(segs, 1)
+        print(seg_class.shape)
+        result = Image.fromarray(COLOR[seg_class[0].detach().cpu().numpy()])
         result.save('results/eval_{}.png'.format(str(batchi).zfill(4)))
-
+        
 
