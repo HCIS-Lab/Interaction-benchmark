@@ -290,11 +290,9 @@ class Deeplabv3PlusEncode(nn.Module):
         self.classifier = Deeplabv3Plus(self.inplanes, self.low_level_planes, outC, self.aspp_dilate)
 
     def forward(self, x):
-        input_shape = x.shape[2:]
         feature = self.backbone(x)
         x = self.classifier(feature)
-        x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
-        x = F.interpolate(x, scale_factor=1.28, mode='bilinear', align_corners=False)
+        x = F.interpolate(x, scale_factor=5.12, mode='bilinear', align_corners=False)
         return x
         
 class LiftSplatShoot(nn.Module):
