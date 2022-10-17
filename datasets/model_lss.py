@@ -1,7 +1,9 @@
+from collections import OrderedDict
 import torch
-from torch import nn
+import torch.nn as nn
+import torch.nn.functional as F
 from efficientnet_pytorch import EfficientNet
-from torchvision.models.resnet import resnet18
+from torchvision.models.resnet import resnet18, resnet50
 from tool import gen_dx_bx, cumsum_trick, QuickCumsum
 
 class Up(nn.Module):
@@ -129,8 +131,174 @@ class BevEncode(nn.Module):
 
         return x1, x
 
+class IntermediateLayerGetter(nn.ModuleDict):
+    def __init__(self, model, return_layers, hrnet_flag=False):
+        if not set(return_layers).issubset([name for name, _ in model.named_children()]):
+            print([(name , _) for name, _ in model.named_children()])
+            raise ValueError("return_layers are not present in model")
+        
+        self.hrnet_flag = hrnet_flag
+        
+        orig_return_layers = return_layers
+        return_layers = {k: v for k, v in return_layers.items()}
+        layers = OrderedDict()
+        for name, module in model.named_children():
+            layers[name] = module
+            if name in return_layers:
+                del return_layers[name]
+            if not return_layers:
+                break
+        super(IntermediateLayerGetter, self).__init__(layers)
+        self.return_layers = orig_return_layers
+    
+    def forward(self, x):
+        out = OrderedDict()
+        for name, module in self.named_children():
+            if self.hrnet_flag and name.startswith('transition'):
+                if name == 'transition1':
+                    x = [trans(x) for trans in module]
+                else:
+                    x.append(module(x[-1]))
+            else:
+                x = module(x)
+            
+            if name in self.return_layers:
+                out_name = self.return_layers[name]
+                if name == 'stage4' and self.hrnet_flag:
+                    output_h, output_w = x[0].size(2), x[0].size(3)
+                    x1 = F.interpolate(x[1], size=(output_h, output_w), mode='bilinear', align_corners=False)
+                    x2 = F.interpolate(x[2], size=(output_h, output_w), mode='bilinear', align_corners=False)
+                    x3 = F.interpolate(x[3], size=(output_h, output_w), mode='bilinear', align_corners=False)
+                    x = torch.cat([x[0], x1, x2, x3], dim=1)
+                    out[out_name] = x
+                else:
+                    out[out_name] = x
+                    
+        return out
+    
+class ASPPConv(nn.Sequential):
+    def __init__(self, in_channels, out_channels, dilation):
+        modules = [
+            nn.Conv2d(in_channels, out_channels, 3, padding=dilation, dilation=dilation, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        ]
+        super(ASPPConv, self).__init__(*modules)
+        
+class ASPPPooling(nn.Sequential):
+    def __init__(self, in_channels, out_channels):
+        super(ASPPPooling, self).__init__(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        
+    def forward(self, x):
+        size = x.shape[-2:]
+        x = super(ASPPPooling, self).forward(x)
+        return F.interpolate(x, size=size, mode='bilinear', align_corners=False)
+
+class ASPP(nn.Module):
+    def __init__(self, in_channels, atrous_rates):
+        super(ASPP, self).__init__()
+        out_channels = 256
+        modules = []
+        modules.append(nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        ))
+        
+        rate1, rate2, rate3 = tuple(atrous_rates)
+        modules.append(ASPPConv(in_channels, out_channels, rate1))
+        modules.append(ASPPConv(in_channels, out_channels, rate2))
+        modules.append(ASPPConv(in_channels, out_channels, rate3))
+        modules.append(ASPPPooling(in_channels, out_channels))
+        
+        self.convs = nn.ModuleList(modules)
+        
+        self.project = nn.Sequential(
+            nn.Conv2d(5 * out_channels, out_channels, 1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1)
+        )
+        
+    def forward(self, x):
+        res = []
+        for conv in self.convs:
+            res.append(conv(x))
+        res = torch.cat(res, dim=1)
+        return self.project(res)
+    
+class Deeplabv3Plus(nn.Module):
+    def __init__(self, in_channels, low_level_channels, outC, aspp_dilate):
+        super(Deeplabv3Plus, self).__init__()
+        self.project = nn.Sequential(
+            nn.Conv2d(low_level_channels, 48, 1, bias=False),
+            nn.BatchNorm2d(48),
+            nn.ReLU(inplace=True)
+        )
+        
+        self.aspp = ASPP(in_channels, aspp_dilate)
+        
+        self.classifier = nn.Sequential(
+            nn.Conv2d(304, 256, 3, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(256, outC, 1)
+        )
+        self._init_weight()
+        
+    def forward(self, feature):
+        low_level_feature = self.project(feature['low_level'])
+        output_feature = self.aspp(feature['out'])
+        output_feature = F.interpolate(output_feature, size=low_level_feature.shape[2:], mode='bilinear', align_corners=False)
+        out = self.classifier(torch.cat([low_level_feature, output_feature], dim=1))
+        return out
+    
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+                
+class Deeplabv3PlusEncode(nn.Module):
+    def __init__(self, inC, outC):
+        super(Deeplabv3PlusEncode, self).__init__()
+        
+        self.aspp_dilate = [12, 24, 36]
+        
+        trunk = resnet50(weights=None, zero_init_residual=True, replace_stride_with_dilation=[False, True, True])
+        self.trunk = nn.Sequential(OrderedDict([
+            ('conv1', nn.Conv2d(inC, 64, kernel_size=7, stride=2, padding=3, bias=False)),
+            ('bn1', trunk.bn1), 
+            ('relu', trunk.relu),
+            ('maxpool', trunk.maxpool),
+            ('layer1', trunk.layer1),
+            ('layer2', trunk.layer2),
+            ('layer3', trunk.layer3),
+            ('layer4', trunk.layer4)           
+        ]))
+        self.return_layers = {'layer4': 'out', 'layer1': 'low_level'}
+        self.inplanes = 2048
+        self.low_level_planes = 256
+        self.backbone = IntermediateLayerGetter(self.trunk, self.return_layers)    
+        self.classifier = Deeplabv3Plus(self.inplanes, self.low_level_planes, outC, self.aspp_dilate)
+
+    def forward(self, x):
+        input_shape = x.shape[2:]
+        feature = self.backbone(x)
+        x = self.classifier(feature)
+        x = F.interpolate(x, size=input_shape, mode='bilinear', align_corners=False)
+        x = F.interpolate(x, scale_factor=1.28, mode='bilinear', align_corners=False)
+        return x
+        
 class LiftSplatShoot(nn.Module):
-    def __init__(self, grid_conf, data_aug_conf, outC):
+    def __init__(self, grid_conf, data_aug_conf, outC, is_deeplab=False):
         super(LiftSplatShoot, self).__init__()
         self.grid_conf = grid_conf
         self.data_aug_conf = data_aug_conf
@@ -148,7 +316,10 @@ class LiftSplatShoot(nn.Module):
         self.frustum = self.create_frustum()
         self.D, _, _, _ = self.frustum.shape   # torch.Size([41, 8, 22, 3])
         self.camencode = CamEncode(self.D, self.camC, self.downsample)
-        self.bevencode = BevEncode(inC=self.camC, outC=outC)
+        if is_deeplab:
+            self.bevencode = Deeplabv3PlusEncode(inC=self.camC, outC=outC)
+        else:
+            self.bevencode = BevEncode(inC=self.camC, outC=outC)
 
         # toggle using QuickCumsum vs. autograd
         self.use_quickcumsum = True
@@ -265,7 +436,7 @@ class LiftSplatShoot(nn.Module):
 
         return x1, x
 
-def compile_model(grid_conf, data_aug_conf, outC):
-    return LiftSplatShoot(grid_conf, data_aug_conf, outC)
+def compile_model(grid_conf, data_aug_conf, outC, is_deeplab=False):
+    return LiftSplatShoot(grid_conf, data_aug_conf, outC, is_deeplab)
 
 

@@ -2,7 +2,7 @@ from PIL import Image
 import numpy as np
 import torch 
 from model_lss import compile_model
-from data_lss import compile_data
+from data_lss import compile_visual_data
 import os
 
 device = torch.device('cuda:1')
@@ -50,41 +50,34 @@ data_aug_conf = {
     'Ncams': 3
 }
     
+def main():
+    visual_loader = compile_visual_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, batch_size=1)
+    model = compile_model(grid_conf, data_aug_conf, outC=10)
+    model.load_state_dict(torch.load('./models/model_video.pt'))
+    model.to(device)
 
-train_loader, val_loader = compile_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, batch_size=1)
-print(f'len: {len(train_loader)}')
-model = compile_model(grid_conf, data_aug_conf, outC=10)
-model.load_state_dict(torch.load('model.pt'))
+    model.eval()
+    if not os.path.isdir('/data/scenario_retrieval/results'):
+        os.mkdir('/data/scenario_retrieval/results')
+   
 
-model.to(device)
-
-model.eval()
-
-if not os.path.isdir('./results'):
-    os.mkdir('./results')
-
-for file in os.listdir('./results'):
-    os.remove('./results/' + file)
-
-
-with torch.no_grad():
-    total_intersect = 0.0
-    total_union = 0.0
-    for batchi, data in enumerate(train_loader):
-        imgs, rots, trans, intrins, post_rots, post_trans, binimgs = data
-        pred_segs = model(
-                        imgs.to(device),
-                        rots.to(device),
-                        trans.to(device),
-                        intrins.to(device),
-                        post_rots.to(device),
-                        post_trans.to(device)
-                        )
-        pred_segs = pred_segs[:, :, :128, :]
-        segs = pred_segs.clone().sigmoid()
-        seg_class = torch.argmax(segs, 1)
-        print(seg_class.shape)
-        result = Image.fromarray(COLOR[seg_class[0].detach().cpu().numpy()])
-        result.save('results/eval_{}.png'.format(str(batchi).zfill(4)))
-        
-
+    print('Start saving images...')
+    with torch.no_grad():
+        for batchi, data in enumerate(visual_loader):
+            path, frame, imgs, rots, trans, intrins, post_rots, post_trans = data
+            pred_segs = model(
+                            imgs.to(device),
+                            rots.to(device),
+                            trans.to(device),
+                            intrins.to(device),
+                            post_rots.to(device),
+                            post_trans.to(device)
+                            )
+            pred_segs = pred_segs[:, :, :128, :]
+            segs = pred_segs.clone().sigmoid()
+            seg_class = torch.argmax(segs, 1)
+            result = Image.fromarray(COLOR[seg_class[0].detach().cpu().numpy()])
+            result.save('/data/scenario_retrieval/results/' + path[0] + '/' + str(frame.detach().cpu().numpy()[0]).zfill(8)+'.png')
+            
+if __name__ == '__main__':
+    main()

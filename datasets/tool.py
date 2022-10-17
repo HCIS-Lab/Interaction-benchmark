@@ -12,6 +12,7 @@ from tqdm import tqdm
 # from pyquaternion import Quaternion
 from PIL import Image
 from functools import reduce
+import torch.nn as nn
 import torch.nn.functional as F
 
 import matplotlib as mpl
@@ -218,22 +219,31 @@ class QuickCumsum(torch.autograd.Function):
         return val, None, None
 
 
-class SimpleLoss(torch.nn.Module):
+class SimpleLoss(nn.Module):
     def __init__(self, pos_weight):
         super(SimpleLoss, self).__init__()
-        self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([pos_weight]))
+        self.loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([pos_weight]))
 
     def forward(self, ypred, ytgt):
         loss = self.loss_fn(ypred, ytgt)
         return loss
 
-class FocalLoss(torch.nn.Module):
-    def __init__(self):
+# https://github.com/VainF/DeepLabV3Plus-Pytorch/blob/master/utils/loss.py
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, size_average=True, device=torch.device('cuda:1')):
         super(FocalLoss, self).__init__()
-
-    def forward(self):
-        pass
-
+        self.device= device
+        self.gamma = gamma
+        self.alpha = alpha
+        self.size_average = size_average
+    def forward(self, ypred, ytgt):
+        ce_loss = F.cross_entropy(ypred, ytgt, reduction='none', ignore_index=255).to(self.device)
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        if self.size_average:
+            return focal_loss.mean()
+        else:
+            return focal_loss.sum()
 
 def get_batch_iou(preds, binimgs):
     """Assumes preds has NOT been sigmoided yet
@@ -243,13 +253,13 @@ def get_batch_iou(preds, binimgs):
     with torch.no_grad():
         pred = (preds > 0)
         tgt = binimgs.bool()
-        intersects = torch.sum((pred & tgt).permute(1,0,2,3), dim=(1, 2, 3)).float()
-        unions = torch.sum((pred | tgt).permute(1,0,2,3), dim=(1, 2, 3)).float()
+        intersects = torch.sum((pred & tgt), dim=(0, 2, 3)).float()
+        unions = torch.sum((pred | tgt), dim=(0, 2, 3)).float()
         intersect = torch.sum((pred & tgt)).float().item()
         union = torch.sum((pred | tgt)).float().item()
-        print(intersect,union)
+        
     return  intersects, unions, intersect, union
-
+    
 def get_pedestrian_ratio(preds, binimgs):
     pre_num = 0
     GT_num = 0

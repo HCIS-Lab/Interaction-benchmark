@@ -5,7 +5,7 @@ import torch.optim as optim
 from argparse import ArgumentParser 
 from model_lss import compile_model
 from data_lss import compile_data
-from tool import SimpleLoss, get_batch_iou, get_pedestrian_ratio
+from tool import SimpleLoss, FocalLoss, get_batch_iou, get_pedestrian_ratio
 from torch.utils.tensorboard import SummaryWriter
 
 root='/data/carla_dataset/data_collection/'
@@ -36,27 +36,32 @@ def main():
     parser.add_argument('--weight_decay', type=float, default=1e-7, help='weight_decay')
     parser.add_argument('--pos_weight', type=float, default=2.13, help='pos_weight')
     parser.add_argument('--max_grad_norm', type=float, default=5.0, help='max grad norm')
+    parser.add_argument('--loss', type=str, default='simple_loss', help='loss function')
+    parser.add_argument('--deeplab', type=bool, default=False, help='bevEncoder is deeplab')
+    parser.add_argument('--only_town_10', type=bool, default=False, help='train with only town-10 dataset')
     args = parser.parse_args()
-
+    
+    is_deeplab = args.deeplab
+    only_town_10 = args.only_town_10
     device = torch.device('cuda:1')
-    print(device)
+    print("Device: " + str(device))
     writer = SummaryWriter()
     print('Searching data...')
-    train_loader, val_loader = compile_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, batch_size=args.batch_size)
-    model = compile_model(grid_conf, data_aug_conf, outC=10).to(device)
+    train_loader, val_loader = compile_data(data_root=root, grid_conf=grid_conf, data_aug_conf=data_aug_conf, batch_size=args.batch_size, only_town_10=only_town_10)
+    model = compile_model(grid_conf, data_aug_conf, outC=10, is_deeplab=is_deeplab).to(device)
     
     optimizer = optim.Adam(model.parameters(), lr = args.lr, weight_decay=args.weight_decay)
-    criterion = SimpleLoss(pos_weight=args.pos_weight).to(device)
+    if args.loss == 'simple_loss':
+        criterion = SimpleLoss(pos_weight=args.pos_weight).to(device)
+    elif args.loss == 'focal_loss':
+        criterion = FocalLoss().to(device)
+    elif args.loss == 'ce_loss':
+        criterion = torch.nn.CrossEntropyLoss().to(device)
     print('Start training...')
     best_iou, best_individual_iou = 0, torch.zeros(10)
 
     if os.path.isfile('iou_record.txt'):
         os.remove('iou_record.txt')
-    # if len(os.listdir('runs')) != 0:
-    #     for tfboard_dir in os.listdir('runs'):
-    #         for tfboard_file in os.listdir(os.path.join('runs', tfboard_dir)):
-    #             os.remove(os.path.join('runs', tfboard_dir, tfboard_file))
-    #         os.rmdir(os.path.join('runs', tfboard_dir))
         
     for epoch in tqdm(range(1, args.epochs+1)):
         # train
@@ -102,7 +107,6 @@ def main():
                 total_intersect += intersect
                 total_union += union
                 total_val_loss += val_loss.item()
-
             individual_iou = torch.div(individual_intersects, individual_unions)
             total_iou = total_intersect / total_union
             
@@ -119,7 +123,7 @@ def main():
                         f.write(f'{best_individual_iou[i]} ')
                     f.write('\n')
                     # f.write(f'The ratio: {ratio_predict:04f}\n')
-                torch.save(model.state_dict(), f'model.pt')
+                torch.save(model.state_dict(), f'./models/model.pt')
 
             writer.add_scalar('train/loss', total_train_loss, epoch)
             writer.add_scalar('val/loss', total_val_loss, epoch)
