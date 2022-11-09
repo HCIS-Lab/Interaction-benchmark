@@ -527,7 +527,7 @@ def demo(batch_size, model_path, local_path,nas_path,ablation,tracking=None,clip
                 # plt.show()
 
 def guan_lun(batch_size, model_path, local_path,nas_path,ablation,th,accumulate_frame,tracking=None,clip_time=60):
-    temppp = int(input("Testing input 1, Validating input 2"))
+    temppp = int(input("Testing input 1, Validating input 2: "))
     testing = True if temppp == 1 else 2
     single = True
     if tracking is not None:
@@ -632,16 +632,16 @@ def guan_lun(batch_size, model_path, local_path,nas_path,ablation,th,accumulate_
                         out[s_type][accumulate-1][k][file_name] = temp_1
     print(out)
     with open('risk_assessment_collision_prediction_baseline2_interactive.json', 'w') as f:
-        json.dump(out, f)
+        json.dump(out[0], f)
     with open('risk_assessment_collision_prediction_baseline2_collision.json', 'w') as f:
-        json.dump(out, f)
+        json.dump(out[1], f)
     with open('risk_assessment_collision_prediction_baseline2_non-interactive.json', 'w') as f:
-        json.dump(out, f)
+        json.dump(out[2], f)
     with open('risk_assessment_collision_prediction_baseline2_obstacle.json', 'w') as f:
-        json.dump(out, f)
+        json.dump(out[3], f)
 
 def risky_object(batch_size, model_path, local_path,nas_path,ablation,tracking=None,clip_time=60):
-    temppp = int(input("Testing input 1, Validating input 2"))
+    temppp = int(input("Testing input 1, Validating input 2: "))
     testing = True if temppp == 1 else 2
     def count(branch,flag):
         if branch == 1:
@@ -705,6 +705,7 @@ def risky_object(batch_size, model_path, local_path,nas_path,ablation,tracking=N
     net.eval()
     _,testingloader,validationloader = carla_dataset.get_dataset_loader(2,local_path,nas_path,tracking,batch_size,detection_collate,clip_time,validation=True)
     loader = testingloader if testing else validationloader
+    exit()
     out = {}
     if testing:
         collision_th = 0.5
@@ -794,7 +795,7 @@ def risky_object(batch_size, model_path, local_path,nas_path,ablation,tracking=N
 
                         for jj,data in enumerate(datas):
                             if not flag:
-                                if s_type == 2 or frame_num<GT_start:
+                                if s_type == 2 :#or frame_num<GT_start:
                                     count(3,False)
                                 else:
                                     if data['actor_id'] == agent_id:
@@ -802,7 +803,7 @@ def risky_object(batch_size, model_path, local_path,nas_path,ablation,tracking=N
                                     else:
                                         count(3,False)
                                 continue
-                            if s_type == 2 or frame_num<GT_start:
+                            if s_type == 2 :#or frame_num<GT_start:
                                 if jj>= 20:
                                     count(2,False)
                                 else:
