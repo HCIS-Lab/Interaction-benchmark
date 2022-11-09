@@ -527,6 +527,13 @@ def demo(batch_size, model_path, local_path,nas_path,ablation,tracking=None,clip
                 # plt.show()
 
 def guan_lun(batch_size, model_path, local_path,nas_path,ablation,th,accumulate_frame,tracking=None,clip_time=60):
+    '''
+        out: List[List[Dict[Dict[Dict[bool]]]]]
+            index:
+                first list: 0~3 (accumulate = 1,2,3,4)
+                second list: 0~12 (collision threshold = 0.3,0.35,0.40,...,0.9)
+    '''
+    
     temppp = int(input("Testing input 1, Validating input 2: "))
     testing = True if temppp == 1 else 2
     single = True
@@ -632,13 +639,13 @@ def guan_lun(batch_size, model_path, local_path,nas_path,ablation,th,accumulate_
                         out[s_type][accumulate-1][k][file_name] = temp_1
     print(out)
     with open('risk_assessment_collision_prediction_baseline2_interactive.json', 'w') as f:
-        json.dump(out[0], f)
+        json.dump(out[0][0], f)
     with open('risk_assessment_collision_prediction_baseline2_collision.json', 'w') as f:
-        json.dump(out[1], f)
+        json.dump(out[1][0], f)
     with open('risk_assessment_collision_prediction_baseline2_non-interactive.json', 'w') as f:
-        json.dump(out[2], f)
+        json.dump(out[2][0], f)
     with open('risk_assessment_collision_prediction_baseline2_obstacle.json', 'w') as f:
-        json.dump(out[3], f)
+        json.dump(out[3][0], f)
 
 def risky_object(batch_size, model_path, local_path,nas_path,ablation,tracking=None,clip_time=60):
     temppp = int(input("Testing input 1, Validating input 2: "))
